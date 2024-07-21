@@ -42,4 +42,16 @@ impl VoiceManager {
     fn find_oldest_voice(&mut self) -> Option<&mut Voice> {
         self.voices.iter_mut().min_by_key(|v| v.note)
     }
+
+    pub fn set_filter_cutoff(&mut self, cutoff: f32) {
+        for voice in &mut self.voices {
+            voice.set_filter_cutoff(cutoff);
+        }
+    }
+
+    pub fn set_filter_resonance(&mut self, resonance: f32) {
+        for voice in &mut self.voices {
+            voice.set_filter_resonance(resonance);
+        }
+    }
 }

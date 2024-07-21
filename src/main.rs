@@ -1,9 +1,9 @@
 mod envelope;
-mod filter;
 mod oscillator;
 mod ui;
 mod voice;
 mod voice_manager;
+mod filter;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat, SizedSample};

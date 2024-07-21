@@ -1,11 +1,11 @@
 use crate::oscillator::Oscillator;
 use crate::envelope::Envelope;
-use crate::filter::Filter;
+use crate::filter::LadderFilter;
 
 pub struct Voice {
     pub oscillator: Oscillator,
     pub envelope: Envelope,
-    pub filter: Filter,
+    pub filter: LadderFilter,
     pub note: Option<u8>,
 }
 
@@ -14,7 +14,7 @@ impl Voice {
         Self {
             oscillator: Oscillator::new(sample_rate, 440.0),
             envelope: Envelope::new(sample_rate),
-            filter: Filter::new(),
+            filter: LadderFilter::new(sample_rate),
             note: None,
         }
     }
@@ -39,5 +39,13 @@ impl Voice {
         let osc_sample = self.oscillator.next_sample();
         let env_sample = self.envelope.next_sample();
         self.filter.process(osc_sample * env_sample)
+    }
+
+    pub fn set_filter_cutoff(&mut self, cutoff: f32) {
+        self.filter.set_cutoff(cutoff);
+    }
+
+    pub fn set_filter_resonance(&mut self, resonance: f32) {
+        self.filter.set_resonance(resonance);
     }
 }

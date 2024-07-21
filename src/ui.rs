@@ -8,7 +8,6 @@ const OCTAVES: usize = 3;
 const WHITE_KEY_INDICES: [usize; 7] = [0, 2, 4, 5, 7, 9, 11];
 const BLACK_KEY_INDICES: [usize; 5] = [1, 3, 6, 8, 10];
 
-
 pub struct SynthUI {
     current_octave: i32,
     key_states: [bool; 128],
@@ -18,6 +17,8 @@ pub struct SynthUI {
     decay: f32,
     sustain: f32,
     release: f32,
+    filter_cutoff: f32,
+    filter_resonance: f32,
     active_mouse_note: Option<u8>,
     voice_manager: Arc<Mutex<VoiceManager>>,
 }
@@ -34,6 +35,8 @@ impl SynthUI {
             decay: 0.1,
             sustain: 0.7,
             release: 0.2,
+            filter_cutoff: 1000.0,
+            filter_resonance: 0.0,
             active_mouse_note: None,
         }
     }
@@ -46,6 +49,8 @@ impl SynthUI {
                 self.draw_controls(ui);
                 ui.add_space(10.0);
                 self.draw_envelope_controls(ui);
+                ui.add_space(10.0);
+                self.draw_filter_controls(ui);
                 ui.add_space(10.0);
                 self.draw_keyboard(ui);
                 self.handle_keyboard_input(ctx);
@@ -151,6 +156,28 @@ impl SynthUI {
                         for voice in &mut vm.voices {
                             voice.envelope.set_release(self.release);
                         }
+                    }
+                });
+            });
+        });
+    }
+
+    fn draw_filter_controls(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Filter Cutoff");
+                    if ui.add(egui::Slider::new(&mut self.filter_cutoff, 20.0..=20000.0).logarithmic(true)).changed() {
+                        self.voice_manager.lock().set_filter_cutoff(self.filter_cutoff);
+                    }
+                });
+            });
+
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Filter Resonance");
+                    if ui.add(egui::Slider::new(&mut self.filter_resonance, 0.0..=4.0)).changed() {
+                        self.voice_manager.lock().set_filter_resonance(self.filter_resonance);
                     }
                 });
             });
