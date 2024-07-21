@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use crate::envelope::Envelope;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Waveform {
     Sine,
     Square,
@@ -57,7 +57,7 @@ impl Oscillator {
     }
 
     pub fn note_to_frequency(note: u8) -> f32 {
-        220.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0)
+        440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0)
     }
 
     pub fn note_on(&mut self) {

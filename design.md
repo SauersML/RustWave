@@ -14,7 +14,6 @@ This document outlines the design for a Rust-based analog synthesizer simulator.
 
 We will use a layered architecture with clear interfaces between components:
 
-```
 +-------------------+
 |    User Interface |
 +-------------------+
@@ -30,7 +29,14 @@ We will use a layered architecture with clear interfaces between components:
 +-------+    +-------+
 | Voice |    |Effects|
 +-------+    +-------+
-```
+    |
++-------------------+
+| Oscillator| Filter|
++-------------------+
+    |
++-------------------+
+|     Envelope      |
++-------------------+
 
 ## 3. Component Breakdown
 
@@ -52,6 +58,10 @@ We will use a layered architecture with clear interfaces between components:
 
 5. **Filter**: Shapes the tone of the voice.
    - Uses traits for different filter types
+   - Implement multiple filter types (Lowpass, Highpass, Bandpass)
+   - Add resonance control
+   - Ladder filter
+
 
 6. **Effects**: Applies post-processing effects.
    - Implements a trait object-based plugin system for flexibility
@@ -122,3 +132,4 @@ We will use a layered architecture with clear interfaces between components:
 1. Explore async Rust for non-audio tasks if beneficial
 2. Consider FFI for integrating with existing audio or MIDI libraries
 3. Investigate using WebAssembly for a web-based version of the synthesizer
+4. Implement a flexible audio graph using traits and generics. Use const generics for fixed-size audio buffers
