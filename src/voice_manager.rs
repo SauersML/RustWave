@@ -54,4 +54,16 @@ impl VoiceManager {
             voice.set_filter_resonance(resonance);
         }
     }
+
+    pub fn set_filter_drive(&mut self, drive: f32) {
+        for voice in &mut self.voices {
+            voice.filter.set_drive(drive);
+        }
+    }
+
+    pub fn set_filter_saturation(&mut self, saturation: f32) {
+        for voice in &mut self.voices {
+            voice.filter.set_saturation(saturation);
+        }
+    }
 }

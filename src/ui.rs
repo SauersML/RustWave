@@ -19,6 +19,8 @@ pub struct SynthUI {
     release: f32,
     filter_cutoff: f32,
     filter_resonance: f32,
+    filter_drive: f32,
+    filter_saturation: f32,
     active_mouse_note: Option<u8>,
     voice_manager: Arc<Mutex<VoiceManager>>,
 }
@@ -37,6 +39,8 @@ impl SynthUI {
             release: 0.2,
             filter_cutoff: 1000.0,
             filter_resonance: 0.0,
+            filter_drive: 1.0,
+            filter_saturation: 3.0,
             active_mouse_note: None,
         }
     }
@@ -146,7 +150,7 @@ impl SynthUI {
                     }
                 });
             });
-    
+
             ui.group(|ui| {
                 ui.vertical(|ui| {
                     ui.label("Release");
@@ -161,6 +165,8 @@ impl SynthUI {
             });
         });
     }
+
+
 
     fn draw_filter_controls(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
@@ -178,6 +184,24 @@ impl SynthUI {
                     ui.label("Filter Resonance");
                     if ui.add(egui::Slider::new(&mut self.filter_resonance, 0.0..=4.0)).changed() {
                         self.voice_manager.lock().set_filter_resonance(self.filter_resonance);
+                    }
+                });
+            });
+
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Filter Drive");
+                    if ui.add(egui::Slider::new(&mut self.filter_drive, 0.1..=5.0)).changed() {
+                        self.voice_manager.lock().set_filter_drive(self.filter_drive);
+                    }
+                });
+            });
+
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Filter Saturation");
+                    if ui.add(egui::Slider::new(&mut self.filter_saturation, 1.0..=10.0)).changed() {
+                        self.voice_manager.lock().set_filter_saturation(self.filter_saturation);
                     }
                 });
             });

@@ -1,9 +1,9 @@
-// filter.rs
-
 pub struct LadderFilter {
     sample_rate: f32,
     cutoff: f32,
     resonance: f32,
+    drive: f32,
+    saturation: f32,
     stage: [f32; 4],
     delay: [f32; 4],
     tanhstage: [f32; 3],
@@ -17,6 +17,8 @@ impl LadderFilter {
             sample_rate,
             cutoff: 1000.0,
             resonance: 0.0,
+            drive: 1.0,
+            saturation: 1.0,
             stage: [0.0; 4],
             delay: [0.0; 4],
             tanhstage: [0.0; 3],
@@ -33,14 +35,20 @@ impl LadderFilter {
         self.resonance = resonance.clamp(0.0, 4.0);
     }
 
+    pub fn set_drive(&mut self, drive: f32) {
+        self.drive = drive.clamp(0.1, 10.0);
+    }
+
+    pub fn set_saturation(&mut self, saturation: f32) {
+        self.saturation = saturation.clamp(0.1, 10.0);
+    }
+
     pub fn process(&mut self, input: f32) -> f32 {
         let fc = self.cutoff / self.sample_rate;
         let f = fc * 1.16;
         let fb = self.resonance * (1.0 - 0.15 * f * f);
-
-        let mut input_with_feedback = input - self.old_y * fb;
+        let mut input_with_feedback = input * self.drive - self.old_y * fb;
         self.old_x = input_with_feedback;
-
         // Four cascaded one-pole filters (bilinear transform)
         for i in 0..4 {
             if i != 0 {
@@ -48,16 +56,12 @@ impl LadderFilter {
             }
             self.stage[i] = input_with_feedback * f + self.delay[i] * (1.0 - f);
         }
-
         self.delay = self.stage;
-
         // Oversampled nonlinear processing
-        self.tanhstage[0] = fast_tanh(self.stage[3]);
-        self.tanhstage[1] = fast_tanh(self.stage[3]);
-        self.tanhstage[2] = fast_tanh(self.stage[3]);
-
+        self.tanhstage[0] = fast_tanh(self.stage[3] * self.saturation);
+        self.tanhstage[1] = fast_tanh(self.stage[3] * self.saturation);
+        self.tanhstage[2] = fast_tanh(self.stage[3] * self.saturation);
         self.old_y = (self.tanhstage[0] + self.tanhstage[1] + self.tanhstage[2]) / 3.0;
-
         self.old_y
     }
 }
