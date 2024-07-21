@@ -44,8 +44,8 @@ We will use a layered architecture with clear interfaces between components:
    - Implemented as a struct with no runtime polymorphism
 
 3. **Oscillator**: Generates raw waveforms.
-   - Uses an enum for different waveform types
-   - Implements a trait for common oscillator operations
+   - Implemented as a struct with methods for different waveform types
+   - Uses atomic types for thread-safe parameter updates
 
 4. **Envelope**: Modulates amplitude over time (ADSR).
    - Implemented as a struct with methods for each stage
@@ -60,8 +60,12 @@ We will use a layered architecture with clear interfaces between components:
    - Uses a custom enum for type-safe MIDI events
 
 8. **User Interface**: Provides control over synth parameters.
-   - Initially a simple CLI, later expandable to GUI
-   - Communicates with audio thread via lock-free structures
+   - Implemented using egui for immediate mode GUI
+   - Communicates with audio thread via Arc<Mutex<>>
+
+9. **Real-time Audio Processing:**
+   - Use lock-free data structures and atomic types for parameter updates
+   - Minimize allocations in the audio callback
 
 ## 4. Rust-Specific Design Considerations
 
@@ -94,40 +98,7 @@ We will use a layered architecture with clear interfaces between components:
    - Utilize SIMD instructions for audio processing where applicable
    - Avoid allocations and blocking operations in the audio thread
 
-## 5. File Structure
-
-```
-src/
-    main.rs
-    synth/
-        mod.rs
-        engine.rs
-        voice.rs
-        oscillator.rs
-        envelope.rs
-        filter.rs
-        effects/
-            mod.rs
-            trait.rs
-            reverb.rs
-            delay.rs
-        types.rs  // For newtype definitions
-    midi/
-        mod.rs
-        handler.rs
-        types.rs  // For MIDI-specific types and enums
-    ui/
-        mod.rs
-        cli.rs
-        gui.rs (to be implemented later)
-    utils/
-        mod.rs
-        ring_buffer.rs
-        object_pool.rs
-    error.rs  // For custom error types
-```
-
-## 6. Key Rust Patterns and Features to Utilize
+## 5. Key Rust Patterns and Features to Utilize
 
 1. **Traits**: For defining common interfaces (e.g., `Oscillator`, `Effect`)
 2. **Enums**: For representing different types (e.g., waveforms, MIDI events)
@@ -138,7 +109,7 @@ src/
 7. **Macros**: For generating repetitive code (e.g., parameter setters)
 8. **Type State Pattern**: For enforcing correct usage of the synthesizer API
 
-## 7. Testing Strategy
+## 6. Testing Strategy
 
 1. Unit tests for individual components (oscillators, envelopes, etc.)
 2. Integration tests for the complete synthesizer
@@ -146,7 +117,7 @@ src/
 4. Benchmark tests for performance-critical sections
 5. Property-based testing for mathematical correctness of audio algorithms
 
-## 8. Future Considerations
+## 7. Future Considerations
 
 1. Explore async Rust for non-audio tasks if beneficial
 2. Consider FFI for integrating with existing audio or MIDI libraries

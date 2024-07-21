@@ -5,8 +5,10 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat, SizedSample};
 use dasp_sample::FromSample;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use parking_lot::Mutex;
 use oscillator::Oscillator;
 use ui::SynthUI;
+use eframe::egui;
 
 struct SynthApp {
     ui: SynthUI,
@@ -15,7 +17,7 @@ struct SynthApp {
 }
 
 impl eframe::App for SynthApp {
-    fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.ui.update(ctx);
     }
 
@@ -31,7 +33,7 @@ where
     let sample_rate = config.sample_rate.0 as f32;
     let channels = config.channels as usize;
 
-    let oscillator = Arc::new(parking_lot::Mutex::new(Oscillator::new(sample_rate, 440.0)));
+    let oscillator = Arc::new(Mutex::new(Oscillator::new(sample_rate, 440.0)));
     let running = Arc::new(AtomicBool::new(true));
 
     let osc_clone = Arc::clone(&oscillator);
@@ -50,7 +52,7 @@ where
     let ui = SynthUI::new(Arc::clone(&oscillator));
 
     let options = eframe::NativeOptions {
-        initial_window_size: Some(eframe::egui::Vec2::new(350.0, 200.0)),
+        initial_window_size: Some(egui::Vec2::new(1200.0, 800.0)),
         ..Default::default()
     };
 
@@ -63,7 +65,7 @@ where
     Ok(())
 }
 
-fn write_data<T>(output: &mut [T], channels: usize, oscillator: &Arc<parking_lot::Mutex<Oscillator>>)
+fn write_data<T>(output: &mut [T], channels: usize, oscillator: &Arc<Mutex<Oscillator>>)
 where
     T: Sample + FromSample<f32>,
 {
