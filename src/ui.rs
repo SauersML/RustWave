@@ -14,6 +14,10 @@ pub struct SynthUI {
     volume: f32,
     waveform: Waveform,
     key_states: [bool; KEYS_IN_OCTAVE * OCTAVES],
+    attack: f32,
+    decay: f32,
+    sustain: f32,
+    release: f32,
 }
 
 impl SynthUI {
@@ -24,6 +28,10 @@ impl SynthUI {
             volume: 0.5,
             waveform: Waveform::Sawtooth,
             key_states: [false; KEYS_IN_OCTAVE * OCTAVES],
+            attack: 0.1,
+            decay: 0.1,
+            sustain: 0.7,
+            release: 0.2,
         }
     }
 
@@ -33,6 +41,8 @@ impl SynthUI {
                 self.draw_header(ui);
                 ui.add_space(10.0);
                 self.draw_controls(ui);
+                ui.add_space(10.0);
+                self.draw_envelope_controls(ui);
                 ui.add_space(10.0);
                 self.draw_keyboard(ui);
             });
@@ -52,6 +62,8 @@ impl SynthUI {
             }
         });
     }
+
+
 
     fn draw_controls(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
@@ -77,17 +89,54 @@ impl SynthUI {
         });
     }
 
+    fn draw_envelope_controls(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Attack");
+                    if ui.add(egui::Slider::new(&mut self.attack, 0.01..=2.0).logarithmic(true)).changed() {
+                        self.oscillator.lock().set_attack(self.attack);
+                    }
+                });
+            });
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Decay");
+                    if ui.add(egui::Slider::new(&mut self.decay, 0.01..=2.0).logarithmic(true)).changed() {
+                        self.oscillator.lock().set_decay(self.decay);
+                    }
+                });
+            });
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Sustain");
+                    if ui.add(egui::Slider::new(&mut self.sustain, 0.0..=1.0)).changed() {
+                        self.oscillator.lock().set_sustain(self.sustain);
+                    }
+                });
+            });
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Release");
+                    if ui.add(egui::Slider::new(&mut self.release, 0.01..=2.0).logarithmic(true)).changed() {
+                        self.oscillator.lock().set_release(self.release);
+                    }
+                });
+            });
+        });
+    }
+
     fn draw_keyboard(&mut self, ui: &mut egui::Ui) {
         let available_width = ui.available_width();
         let white_key_width = available_width / (7.0 * OCTAVES as f32);
         let white_key_height = 120.0;
         let black_key_width = white_key_width * 0.6;
         let black_key_height = white_key_height * 0.6;
-
+    
         let (rect, _) = ui.allocate_exact_size(Vec2::new(available_width, white_key_height), egui::Sense::click_and_drag());
         let painter = ui.painter();
-
-        // Draw white keys
+    
+        // Draw and handle white keys
         for octave in 0..OCTAVES {
             for (i, &key_index) in WHITE_KEY_INDICES.iter().enumerate() {
                 let key_num = octave * KEYS_IN_OCTAVE + key_index;
@@ -103,18 +152,21 @@ impl SynthUI {
                 };
                 painter.rect_filled(key_rect, 0.0, color);
                 painter.rect_stroke(key_rect, 0.0, Stroke::new(1.0, Color32::BLACK));
-
+    
+                // Add key press logic here
                 if ui.rect_contains_pointer(key_rect) && ui.input(|i| i.pointer.primary_down()) {
-                    self.key_states[key_num] = true;
-                    self.play_note(key_num as u8);
+                    if !self.key_states[key_num] {
+                        self.key_states[key_num] = true;
+                        self.play_note(key_num as u8, true);
+                    }
                 } else if self.key_states[key_num] && !ui.input(|i| i.pointer.primary_down()) {
                     self.key_states[key_num] = false;
-                    // Here you would implement note-off logic
+                    self.stop_note(key_num as u8);
                 }
             }
         }
-
-        // Draw black keys
+    
+        // Draw and handle black keys
         for octave in 0..OCTAVES {
             for (i, &key_index) in BLACK_KEY_INDICES.iter().enumerate() {
                 let key_num = octave * KEYS_IN_OCTAVE + key_index;
@@ -137,21 +189,33 @@ impl SynthUI {
                 };
                 painter.rect_filled(key_rect, 0.0, color);
                 painter.rect_stroke(key_rect, 0.0, Stroke::new(1.0, Color32::WHITE));
-
+    
+                // Add key press logic here (same as white keys)
                 if ui.rect_contains_pointer(key_rect) && ui.input(|i| i.pointer.primary_down()) {
-                    self.key_states[key_num] = true;
-                    self.play_note(key_num as u8);
+                    if !self.key_states[key_num] {
+                        self.key_states[key_num] = true;
+                        self.play_note(key_num as u8, true);
+                    }
                 } else if self.key_states[key_num] && !ui.input(|i| i.pointer.primary_down()) {
                     self.key_states[key_num] = false;
-                    // Here you would implement note-off logic
+                    self.stop_note(key_num as u8);
                 }
             }
         }
     }
 
-    fn play_note(&mut self, note: u8) {
+    fn play_note(&mut self, note: u8, trigger_envelope: bool) {
+        let mut osc = self.oscillator.lock();
         let frequency = Oscillator::note_to_frequency(note + 12 * self.current_octave as u8);
-        self.oscillator.lock().set_frequency(frequency);
+        osc.set_frequency(frequency);
+        if trigger_envelope {
+            osc.note_on();
+        }
         println!("Playing note: {} Hz", frequency);
+    }
+
+    fn stop_note(&mut self, note: u8) {
+        self.oscillator.lock().note_off();
+        println!("Stopping note: {}", note);
     }
 }

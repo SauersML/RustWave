@@ -1,5 +1,6 @@
 mod oscillator;
 mod ui;
+mod envelope;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat, SizedSample};
