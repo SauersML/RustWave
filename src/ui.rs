@@ -2,16 +2,14 @@ use eframe::egui::{self, Color32, Rect, Stroke, Vec2, Key};
 use std::sync::Arc;
 use parking_lot::Mutex;
 use crate::oscillator::{Oscillator, Waveform};
+use crate::voice_manager::VoiceManager;
 
-const MIDI_NOTE_MIN: u8 = 0;
-const MIDI_NOTE_MAX: u8 = 127;
-const KEYS_IN_OCTAVE: usize = 12;
 const OCTAVES: usize = 3;
 const WHITE_KEY_INDICES: [usize; 7] = [0, 2, 4, 5, 7, 9, 11];
 const BLACK_KEY_INDICES: [usize; 5] = [1, 3, 6, 8, 10];
 
+
 pub struct SynthUI {
-    oscillator: Arc<Mutex<Oscillator>>,
     current_octave: i32,
     key_states: [bool; 128],
     volume: f32,
@@ -21,14 +19,15 @@ pub struct SynthUI {
     sustain: f32,
     release: f32,
     active_mouse_note: Option<u8>,
+    voice_manager: Arc<Mutex<VoiceManager>>,
 }
 
 impl SynthUI {
-    pub fn new(oscillator: Arc<Mutex<Oscillator>>) -> Self {
+    pub fn new(voice_manager: Arc<Mutex<VoiceManager>>) -> Self {
         Self {
+            voice_manager,
             current_octave: 4,
             key_states: [false; 128],
-            oscillator,
             volume: 0.5,
             waveform: Waveform::Sawtooth,
             attack: 0.1,
@@ -74,7 +73,10 @@ impl SynthUI {
                 ui.vertical(|ui| {
                     ui.label("Volume");
                     if ui.add(egui::Slider::new(&mut self.volume, 0.0..=1.0)).changed() {
-                        self.oscillator.lock().set_volume(self.volume);
+                        let mut vm = self.voice_manager.lock();
+                        for voice in &mut vm.voices {
+                            voice.oscillator.set_volume(self.volume);
+                        }
                     }
                 });
             });
@@ -83,14 +85,16 @@ impl SynthUI {
                     ui.label("Waveform");
                     for waveform in [Waveform::Sine, Waveform::Square, Waveform::Sawtooth, Waveform::Triangle].iter() {
                         if ui.selectable_value(&mut self.waveform, *waveform, format!("{:?}", waveform)).clicked() {
-                            self.oscillator.lock().set_waveform(self.waveform);
+                            let mut vm = self.voice_manager.lock();
+                            for voice in &mut vm.voices {
+                                voice.oscillator.set_waveform(self.waveform);
+                            }
                         }
                     }
                 });
             });
         });
     }
-
 
     fn draw_envelope_controls(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
@@ -104,7 +108,10 @@ impl SynthUI {
                     ui.label("Attack");
                     if ui.add(egui::Slider::new(&mut attack, 0.01..=2.0).logarithmic(true)).changed() {
                         self.attack = attack;
-                        self.oscillator.lock().set_attack(self.attack);
+                        let mut vm = self.voice_manager.lock();
+                        for voice in &mut vm.voices {
+                            voice.envelope.set_attack(self.attack);
+                        }
                     }
                 });
             });
@@ -114,7 +121,10 @@ impl SynthUI {
                     ui.label("Decay");
                     if ui.add(egui::Slider::new(&mut decay, 0.01..=2.0).logarithmic(true)).changed() {
                         self.decay = decay;
-                        self.oscillator.lock().set_decay(self.decay);
+                        let mut vm = self.voice_manager.lock();
+                        for voice in &mut vm.voices {
+                            voice.envelope.set_decay(self.decay);
+                        }
                     }
                 });
             });
@@ -124,7 +134,10 @@ impl SynthUI {
                     ui.label("Sustain");
                     if ui.add(egui::Slider::new(&mut sustain, 0.0..=1.0)).changed() {
                         self.sustain = sustain;
-                        self.oscillator.lock().set_sustain(self.sustain);
+                        let mut vm = self.voice_manager.lock();
+                        for voice in &mut vm.voices {
+                            voice.envelope.set_sustain(self.sustain);
+                        }
                     }
                 });
             });
@@ -134,13 +147,15 @@ impl SynthUI {
                     ui.label("Release");
                     if ui.add(egui::Slider::new(&mut release, 0.01..=2.0).logarithmic(true)).changed() {
                         self.release = release;
-                        self.oscillator.lock().set_release(self.release);
+                        let mut vm = self.voice_manager.lock();
+                        for voice in &mut vm.voices {
+                            voice.envelope.set_release(self.release);
+                        }
                     }
                 });
             });
         });
     }
-
 
     fn draw_keyboard(&mut self, ui: &mut egui::Ui) {
         let available_width = ui.available_width();
@@ -203,30 +218,6 @@ impl SynthUI {
     }
 
 
-    fn handle_mouse_input(&mut self, ui: &egui::Ui, rect: Rect, response: &egui::Response) {
-        if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
-            if let Some(note) = self.get_note_from_pointer(pos, rect) {
-                if response.clicked() || (response.dragged() && Some(note) != self.active_mouse_note) {
-                    // Stop the previous note if there was one
-                    if let Some(old_note) = self.active_mouse_note.take() {
-                        self.stop_note(old_note);
-                    }
-                    // Play the new note
-                    self.play_note(note);
-                    self.active_mouse_note = Some(note);
-                }
-            }
-        }
-
-        // Check if the mouse button is released or if the pointer leaves the keyboard area
-        if response.drag_released() || !response.dragged() {
-            if let Some(old_note) = self.active_mouse_note.take() {
-                self.stop_note(old_note);
-            }
-        }
-    }
-
-
 
     fn get_note_from_pointer(&self, pos: egui::Pos2, rect: Rect) -> Option<u8> {
         let rel_pos = pos - rect.min;
@@ -266,7 +257,6 @@ impl SynthUI {
 
         None
     }
-    
 
 
 
@@ -282,10 +272,38 @@ impl SynthUI {
                 if let Some(note) = self.key_to_note(key) {
                     self.play_note(note);
                 }
-            } else if ctx.input(|i| i.key_released(key)) {
+            }
+        }
+
+        // Check for key releases
+        for &key in KEYS.iter() {
+            if ctx.input(|i| i.key_released(key)) {
                 if let Some(note) = self.key_to_note(key) {
                     self.stop_note(note);
                 }
+            }
+        }
+    }
+
+    fn handle_mouse_input(&mut self, ui: &egui::Ui, rect: Rect, response: &egui::Response) {
+        if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+            if let Some(note) = self.get_note_from_pointer(pos, rect) {
+                if response.clicked() || (response.dragged() && Some(note) != self.active_mouse_note) {
+                    // Stop the previous note if there was one
+                    if let Some(old_note) = self.active_mouse_note.take() {
+                        self.stop_note(old_note);
+                    }
+                    // Play the new note
+                    self.play_note(note);
+                    self.active_mouse_note = Some(note);
+                }
+            }
+        }
+
+        // Check if the mouse button is released or if the pointer leaves the keyboard area
+        if response.drag_released() || (!response.dragged() && self.active_mouse_note.is_some()) {
+            if let Some(old_note) = self.active_mouse_note.take() {
+                self.stop_note(old_note);
             }
         }
     }
@@ -304,8 +322,6 @@ impl SynthUI {
         self.calculate_midi_note(octave_offset, note_index.try_into().unwrap())
     }
 
-
-
     fn calculate_midi_note(&self, visual_octave: i32, key_index: usize) -> Option<u8> {
         let base_note = (self.current_octave + visual_octave) * 12 + key_index as i32;
         if base_note >= 0 && base_note <= 127 {
@@ -316,23 +332,14 @@ impl SynthUI {
     }
 
     fn play_note(&mut self, note: u8) {
-        if note <= MIDI_NOTE_MAX {
-            let mut osc = self.oscillator.lock();
-            let frequency = Oscillator::note_to_frequency(note);
-            osc.set_frequency(frequency);
-            osc.note_on();
-            self.key_states[note as usize] = true;
-            println!("Playing note: {} ({:.2} Hz)", note, frequency);
-        }
-    }
-    
-    fn stop_note(&mut self, note: u8) {
-        if note <= MIDI_NOTE_MAX {
-            let mut osc = self.oscillator.lock();
-            osc.note_off();
-            self.key_states[note as usize] = false;
-            println!("Stopping note: {}", note);
-        }
+        self.voice_manager.lock().note_on(note);
+        self.key_states[note as usize] = true;
+        println!("Playing note: {} ({:.2} Hz)", note, Oscillator::note_to_frequency(note));
     }
 
+    fn stop_note(&mut self, note: u8) {
+        self.voice_manager.lock().note_off(note);
+        self.key_states[note as usize] = false;
+        println!("Stopping note: {}", note);
+    }
 }

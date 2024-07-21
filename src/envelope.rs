@@ -100,4 +100,8 @@ impl Envelope {
     pub fn set_release(&self, release: f32) {
         self.release.store(release.to_bits(), Ordering::Relaxed);
     }
+
+    pub fn is_idle(&self) -> bool {
+        self.stage == EnvelopeStage::Idle
+    }
 }

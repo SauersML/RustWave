@@ -9,11 +9,13 @@ This document outlines the design for a Rust-based analog synthesizer simulator.
 3. Maintain real-time performance for audio processing.
 4. Allow for easy addition of new features and components.
 5. Leverage Rust's strengths in safety, concurrency, and performance.
+6. Accurately emulate the sound and behavior of analog synthesizer hardware.
 
 ## 2. Architecture Design
 
 We will use a layered architecture with clear interfaces between components:
 
+```
 +-------------------+
 |    User Interface |
 +-------------------+
@@ -30,13 +32,14 @@ We will use a layered architecture with clear interfaces between components:
 | Voice |    |Effects|
 +-------+    +-------+
     |
-+-------------------+
-| Oscillator| Filter|
-+-------------------+
++---------------------------+
+| Oscillator | Filter | LFO |
++---------------------------+
     |
 +-------------------+
 |     Envelope      |
 +-------------------+
+```
 
 ## 3. Component Breakdown
 
@@ -46,36 +49,53 @@ We will use a layered architecture with clear interfaces between components:
    - Handles audio device interaction
 
 2. **Voice**: Represents a single synthesizer voice.
-   - Contains Oscillator, Envelope, and Filter
+   - Contains Oscillator, Envelope, Filter, and LFO
    - Implemented as a struct with no runtime polymorphism
+   - Add slight detuning between voices for a richer sound
+   - Implement voice stealing algorithm for polyphony
 
 3. **Oscillator**: Generates raw waveforms.
    - Implemented as a struct with methods for different waveform types
    - Uses atomic types for thread-safe parameter updates
+   - Implement analog-style waveform generation with subtle imperfections
+   - Add hard sync capability
+   - Implement FM (Frequency Modulation) between oscillators
+   - Add phase modulation capabilities
 
 4. **Envelope**: Modulates amplitude over time (ADSR).
    - Implemented as a struct with methods for each stage
+   - Implement non-linear ADSR curves to mimic analog behavior
+   - Add voltage-controlled amplifier (VCA) emulation
 
 5. **Filter**: Shapes the tone of the voice.
    - Uses traits for different filter types
    - Implement multiple filter types (Lowpass, Highpass, Bandpass)
    - Add resonance control
-   - Ladder filter
+   - Implement self-oscillation capability
+   - Add filter overdrive/saturation
+   - Emulate analog filter non-linearities and instabilities
 
+6. **LFO (Low Frequency Oscillator)**:
+   - Implement various LFO shapes (sine, triangle, square, random)
+   - Allow LFO to modulate various parameters (pitch, filter cutoff, etc.)
 
-6. **Effects**: Applies post-processing effects.
+7. **Effects**: Applies post-processing effects.
    - Implements a trait object-based plugin system for flexibility
+   - Add analog-style chorus
+   - Implement tape-style delay
+   - Add reverb emulation
 
-7. **MIDI Handler**: Processes MIDI input.
+8. **MIDI Handler**: Processes MIDI input.
    - Uses a custom enum for type-safe MIDI events
 
-8. **User Interface**: Provides control over synth parameters.
+9. **User Interface**: Provides control over synth parameters.
    - Implemented using egui for immediate mode GUI
    - Communicates with audio thread via Arc<Mutex<>>
 
-9. **Real-time Audio Processing:**
-   - Use lock-free data structures and atomic types for parameter updates
-   - Minimize allocations in the audio callback
+10. **Real-time Audio Processing:**
+    - Use lock-free data structures and atomic types for parameter updates
+    - Minimize allocations in the audio callback
+    - Implement oversampling for alias reduction
 
 ## 4. Rust-Specific Design Considerations
 
@@ -108,6 +128,9 @@ We will use a layered architecture with clear interfaces between components:
    - Utilize SIMD instructions for audio processing where applicable
    - Avoid allocations and blocking operations in the audio thread
 
+8. **SIMD Optimization**:
+   - Use Rust's SIMD intrinsics for parallel processing of audio samples
+
 ## 5. Key Rust Patterns and Features to Utilize
 
 1. **Traits**: For defining common interfaces (e.g., `Oscillator`, `Effect`)
@@ -118,18 +141,52 @@ We will use a layered architecture with clear interfaces between components:
 6. **Unsafe Code**: Carefully used for performance-critical sections, with clear safety documentation
 7. **Macros**: For generating repetitive code (e.g., parameter setters)
 8. **Type State Pattern**: For enforcing correct usage of the synthesizer API
+9. **Const Generics**: For compile-time configuration of oversampling rates and buffer sizes
 
-## 6. Testing Strategy
+## 6. Analog-Specific Considerations
 
-1. Unit tests for individual components (oscillators, envelopes, etc.)
-2. Integration tests for the complete synthesizer
-3. Fuzzing tests for MIDI input handling
-4. Benchmark tests for performance-critical sections
-5. Property-based testing for mathematical correctness of audio algorithms
+1. **Oscillator Drift**:
+   - Implement subtle frequency drift to emulate temperature changes in analog circuits
+   - Use noise generators to add slight instability to oscillator pitch
 
-## 7. Future Considerations
+2. **Filter Behavior**:
+   - Model non-linear behavior of filter cutoff and resonance
+   - Implement filter saturation for overdrive effects
+   - Ladder filter
+
+3. **Envelope Non-Linearity**:
+   - Model the non-linear charging and discharging of capacitors in analog ADSR circuits
+
+4. **Component Tolerances**:
+   - Simulate variations in component values to add subtle differences between voices
+
+5. **Analog Warmth**:
+   - Implement soft clipping and saturation throughout the signal path
+   - Add subtle harmonic distortion to mimic analog circuitry
+
+6. **Noise and Imperfections**:
+   - Add low-level noise to various stages of the signal path
+   - Implement "zipper noise" reduction for parameter changes
+
+7. **Power Supply Simulation**:
+   - Model subtle fluctuations in power supply to affect overall sound
+
+8. **Anti-Aliasing**:
+   - Implement oversampling and appropriate anti-aliasing filters
+
+9. **Analog-Style Modulation**:
+   - Implement cross-modulation between oscillators
+   - Allow audio-rate modulation of filter parameters
+
+## 7. Performance Optimizations
+
+1. Implement vectorized operations using SIMD for core DSP functions
+2. Optimize memory access patterns for cache-friendly processing
+3. Implement multi-threading for parallel voice processing
+
+## 8. Future Considerations
 
 1. Explore async Rust for non-audio tasks if beneficial
 2. Consider FFI for integrating with existing audio or MIDI libraries
 3. Investigate using WebAssembly for a web-based version of the synthesizer
-4. Implement a flexible audio graph using traits and generics. Use const generics for fixed-size audio buffers
+4. Implement a flexible audio graph using traits and generics

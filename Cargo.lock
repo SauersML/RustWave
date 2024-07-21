@@ -2332,6 +2332,7 @@ dependencies = [
  "eframe",
  "egui 0.21.0",
  "parking_lot",
+ "rand",
 ]
 
 [[package]]

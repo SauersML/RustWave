@@ -1,21 +1,19 @@
+mod envelope;
+mod filter;
 mod oscillator;
 mod ui;
-mod envelope;
+mod voice;
+mod voice_manager;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat, SizedSample};
 use dasp_sample::FromSample;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use parking_lot::Mutex;
-use oscillator::Oscillator;
-use ui::SynthUI;
 use eframe::egui;
 
-struct SynthApp {
-    ui: SynthUI,
-    _stream: cpal::Stream,
-    running: Arc<AtomicBool>,
-}
+use crate::voice_manager::VoiceManager;
+use crate::ui::SynthUI;
 
 impl eframe::App for SynthApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -27,6 +25,12 @@ impl eframe::App for SynthApp {
     }
 }
 
+struct SynthApp {
+    ui: SynthUI,
+    _stream: cpal::Stream,
+    running: Arc<AtomicBool>,
+}
+
 fn run<T>(device: &cpal::Device, config: &cpal::StreamConfig) -> Result<(), Box<dyn std::error::Error>>
 where
     T: Sample + SizedSample + FromSample<f32>,
@@ -34,15 +38,15 @@ where
     let sample_rate = config.sample_rate.0 as f32;
     let channels = config.channels as usize;
 
-    let oscillator = Arc::new(Mutex::new(Oscillator::new(sample_rate, 440.0)));
+    let voice_manager = Arc::new(Mutex::new(VoiceManager::new(sample_rate, 8))); // 8 voices
     let running = Arc::new(AtomicBool::new(true));
 
-    let osc_clone = Arc::clone(&oscillator);
+    let vm_clone = Arc::clone(&voice_manager);
 
     let stream = device.build_output_stream(
         config,
         move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-            write_data(data, channels, &osc_clone)
+            write_data(data, channels, &vm_clone)
         },
         |err| eprintln!("an error occurred on stream: {}", err),
         None,
@@ -50,7 +54,7 @@ where
 
     stream.play()?;
 
-    let ui = SynthUI::new(Arc::clone(&oscillator));
+    let ui = SynthUI::new(Arc::clone(&voice_manager));
 
     let options = eframe::NativeOptions {
         initial_window_size: Some(egui::Vec2::new(1200.0, 800.0)),
@@ -66,12 +70,12 @@ where
     Ok(())
 }
 
-fn write_data<T>(output: &mut [T], channels: usize, oscillator: &Arc<Mutex<Oscillator>>)
+fn write_data<T>(output: &mut [T], channels: usize, voice_manager: &Arc<Mutex<VoiceManager>>)
 where
     T: Sample + FromSample<f32>,
 {
     for frame in output.chunks_mut(channels) {
-        let value = oscillator.lock().next_sample();
+        let value = voice_manager.lock().render_next();
         let value = T::from_sample(value);
         for sample in frame.iter_mut() {
             *sample = value;
