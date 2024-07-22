@@ -24,10 +24,11 @@ pub struct SynthUI {
     filter_saturation: f32,
     active_mouse_note: Option<u8>,
     voice_manager: Arc<Mutex<VoiceManager>>,
-    reverb_decay: f32,
     chorus_rate: f32,
     chorus_depth: f32,
     chorus_mode: ChorusMode,
+    reverb_decay: f32,
+    reverb_wet: f32,
 }
 
 impl SynthUI {
@@ -47,10 +48,11 @@ impl SynthUI {
             filter_drive: 1.0,
             filter_saturation: 1.0,
             active_mouse_note: None,
-            reverb_decay: 0.5,
             chorus_rate: 0.5,
             chorus_depth: 0.3,
             chorus_mode: ChorusMode::Off,
+            reverb_decay: 0.5,
+            reverb_wet: 0.5,
         }
     }
 
@@ -65,6 +67,16 @@ impl SynthUI {
                     }
                 });
             });
+
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Reverb Wet/Dry");
+                    if ui.add(egui::Slider::new(&mut self.reverb_wet, 0.0..=1.0)).changed() {
+                        self.voice_manager.lock().set_reverb_wet(self.reverb_wet);
+                    }
+                });
+            });
+
 
             ui.group(|ui| {
                 ui.vertical(|ui| {

@@ -142,24 +142,28 @@ impl Chorus {
         self.prev_delay_right = vec![0.0; self.voices.len()];
     }
 
-    pub fn process(&mut self, input: f32) -> (f32, f32) {
+
+    pub fn process(&mut self, input_left: f32, input_right: f32) -> (f32, f32) {
         if self.mode == ChorusMode::Off {
-            return (input, input);
+            return (input_left, input_right);
         }
 
-        let high_passed = self.high_pass_filter.process(input);
-        let filtered_input = self.low_pass_filter.process(high_passed);
+        let high_passed_left = self.high_pass_filter.process(input_left);
+        let high_passed_right = self.high_pass_filter.process(input_right);
+        let filtered_input_left = self.low_pass_filter.process(high_passed_left);
+        let filtered_input_right = self.low_pass_filter.process(high_passed_right);
 
         let feedback_left = self.buffer_left[self.index];
         let feedback_right = self.buffer_right[self.index];
         let feedback = (feedback_left + feedback_right) * 0.5;
-        let input_with_feedback = filtered_input + (self.feedback * feedback).clamp(-1.0, 1.0);
+        let input_with_feedback_left = filtered_input_left + (self.feedback * feedback).clamp(-1.0, 1.0);
+        let input_with_feedback_right = filtered_input_right + (self.feedback * feedback).clamp(-1.0, 1.0);
 
-        self.buffer_left[self.index] = input_with_feedback;
-        self.buffer_right[self.index] = input_with_feedback;
+        self.buffer_left[self.index] = input_with_feedback_left;
+        self.buffer_right[self.index] = input_with_feedback_right;
         self.index = (self.index + 1) % self.size;
 
-        let (left_output, right_output) = self.calculate_delay_samples(input_with_feedback);
+        let (left_output, right_output) = self.calculate_delay_samples(input_with_feedback_left, input_with_feedback_right);
 
         let noise = self.noise_generator.lock().unwrap().generate();
         let left_output = left_output + noise;
@@ -169,13 +173,14 @@ impl Chorus {
         let right_output = self.saturation.process(right_output);
 
         let wet_dry_mix = self.wet_dry_mix.clamp(0.0, 1.0);
-        let left = (1.0 - wet_dry_mix) * input + wet_dry_mix * left_output;
-        let right = (1.0 - wet_dry_mix) * input + wet_dry_mix * right_output;
+        let left = (1.0 - wet_dry_mix) * input_left + wet_dry_mix * left_output;
+        let right = (1.0 - wet_dry_mix) * input_right + wet_dry_mix * right_output;
 
         (left.clamp(-1.0, 1.0), right.clamp(-1.0, 1.0))
     }
 
-    fn calculate_delay_samples(&mut self, input: f32) -> (f32, f32) {
+
+    fn calculate_delay_samples(&mut self, input_left: f32, input_right: f32) -> (f32, f32) {
         let mut left_output = 0.0;
         let mut right_output = 0.0;
 
@@ -220,26 +225,14 @@ impl Chorus {
         }
 
         if !self.voices.is_empty() {
-            left_output = left_output / self.voices.len() as f32 + input * 0.5;
-            right_output = right_output / self.voices.len() as f32 + input * 0.5;
+            left_output = left_output / self.voices.len() as f32 + input_left * 0.5;
+            right_output = right_output / self.voices.len() as f32 + input_right * 0.5;
         } else {
-            left_output = input;
-            right_output = input;
+            left_output = input_left;
+            right_output = input_right;
         }
 
         (left_output, right_output)
-    }
-
-    pub fn set_feedback(&mut self, feedback: f32) {
-        self.feedback = feedback.clamp(0.0, 0.99);
-    }
-
-    pub fn set_wet_dry_mix(&mut self, mix: f32) {
-        self.wet_dry_mix = mix.clamp(0.0, 1.0);
-    }
-
-    pub fn set_drive(&mut self, drive: f32) {
-        self.saturation.set_drive(drive);
     }
 }
 
@@ -314,10 +307,6 @@ impl Saturation {
 
     fn process(&self, input: f32) -> f32 {
         (input * self.drive).tanh()
-    }
-
-    fn set_drive(&mut self, drive: f32) {
-        self.drive = drive.clamp(1.0, 10.0);
     }
 }
 
