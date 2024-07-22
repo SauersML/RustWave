@@ -54,8 +54,10 @@ struct Saturation {
 }
 
 struct Voice {
-    phase: f32,
-    rate: f32,
+    phase_left: f32,
+    phase_right: f32,
+    rate_left: f32,
+    rate_right: f32,
     depth: f32,
     smooth_depth: f32,
 }
@@ -79,9 +81,9 @@ impl Chorus {
             rate: 0.5,
             depth: 0.5,
             voices: vec![
-                Voice::new(0.513, 0.7),
-                Voice::new(0.75, 0.6),
-                Voice::new(0.95, 0.5),
+                Voice::new(0.513, 0.515, 0.7),
+                Voice::new(0.75, 0.753, 0.6),
+                Voice::new(0.95, 0.953, 0.5),
             ],
             wet_dry_mix: 0.5,
             prev_delay_left: vec![0.0; 3],
@@ -92,7 +94,8 @@ impl Chorus {
     pub fn set_rate(&mut self, rate: f32) {
         self.rate = rate.clamp(0.1, 10.0);
         for voice in &mut self.voices {
-            voice.rate = self.rate * (0.9 + rand::thread_rng().gen::<f32>() * 0.2);
+            voice.rate_left = self.rate * (0.9 + rand::thread_rng().gen::<f32>() * 0.2);
+            voice.rate_right = self.rate * (0.9 + rand::thread_rng().gen::<f32>() * 0.2);
         }
     }
 
@@ -103,7 +106,6 @@ impl Chorus {
         }
     }
 
-
     pub fn set_mode(&mut self, mode: ChorusMode) {
         self.mode = mode;
         match mode {
@@ -112,26 +114,26 @@ impl Chorus {
                 self.wet_dry_mix = 0.0;
             },
             ChorusMode::I => {
-                self.voices = vec![Voice::new(0.513, 0.00535)];
-                self.wet_dry_mix = 0.3;
+                self.voices = vec![Voice::new(0.513, 0.515, 0.00535)];
+                self.wet_dry_mix = 0.5;
             },
             ChorusMode::II => {
-                self.voices = vec![Voice::new(0.863, 0.00535)];
-                self.wet_dry_mix = 0.4;
+                self.voices = vec![Voice::new(0.863, 0.865, 0.00535)];
+                self.wet_dry_mix = 0.8;
             },
             ChorusMode::III => {
                 self.voices = vec![
-                    Voice::new(0.513, 0.0037),
-                    Voice::new(0.863, 0.0037),
+                    Voice::new(0.513, 0.515, 0.0037),
+                    Voice::new(0.863, 0.865, 0.0037),
                 ];
                 self.wet_dry_mix = 0.5;
             },
             ChorusMode::IV => {
                 self.voices = vec![
-                    Voice::new(0.5, 0.007),
-                    Voice::new(0.75, 0.006),
-                    Voice::new(1.0, 0.005),
-                    Voice::new(1.25, 0.004),
+                    Voice::new(0.5, 0.502, 0.007),
+                    Voice::new(0.75, 0.752, 0.006),
+                    Voice::new(1.0, 1.002, 0.005),
+                    Voice::new(1.25, 1.252, 0.004),
                 ];
                 self.wet_dry_mix = 0.6;
             },
@@ -140,37 +142,36 @@ impl Chorus {
         self.prev_delay_right = vec![0.0; self.voices.len()];
     }
 
-
     pub fn process(&mut self, input: f32) -> (f32, f32) {
         if self.mode == ChorusMode::Off {
             return (input, input);
         }
-    
+
         let high_passed = self.high_pass_filter.process(input);
         let filtered_input = self.low_pass_filter.process(high_passed);
-    
+
         let feedback_left = self.buffer_left[self.index];
         let feedback_right = self.buffer_right[self.index];
         let feedback = (feedback_left + feedback_right) * 0.5;
         let input_with_feedback = filtered_input + (self.feedback * feedback).clamp(-1.0, 1.0);
-    
+
         self.buffer_left[self.index] = input_with_feedback;
         self.buffer_right[self.index] = input_with_feedback;
         self.index = (self.index + 1) % self.size;
-    
+
         let (left_output, right_output) = self.calculate_delay_samples(input_with_feedback);
-    
+
         let noise = self.noise_generator.lock().unwrap().generate();
         let left_output = left_output + noise;
         let right_output = right_output + noise;
-    
+
         let left_output = self.saturation.process(left_output);
         let right_output = self.saturation.process(right_output);
-    
+
         let wet_dry_mix = self.wet_dry_mix.clamp(0.0, 1.0);
         let left = (1.0 - wet_dry_mix) * input + wet_dry_mix * left_output;
         let right = (1.0 - wet_dry_mix) * input + wet_dry_mix * right_output;
-    
+
         (left.clamp(-1.0, 1.0), right.clamp(-1.0, 1.0))
     }
 
@@ -179,13 +180,17 @@ impl Chorus {
         let mut right_output = 0.0;
 
         for voice in &mut self.voices {
-            voice.phase += voice.rate / self.sample_rate;
-            if voice.phase >= 1.0 { voice.phase -= 1.0; }
+            voice.phase_left += voice.rate_left / self.sample_rate;
+            voice.phase_right += voice.rate_right / self.sample_rate;
+            if voice.phase_left >= 1.0 { voice.phase_left -= 1.0; }
+            if voice.phase_right >= 1.0 { voice.phase_right -= 1.0; }
 
             voice.smooth_depth += (voice.depth - voice.smooth_depth) * 0.001;
 
-            let lfo_left = (2.0 * PI * voice.phase).sin() * 0.5 + 0.5;
-            let lfo_right = (2.0 * PI * (voice.phase + 0.25)).sin() * 0.5 + 0.5;
+            let lfo_left = ((2.0 * PI * voice.phase_left).sin() * 0.51 + 0.5) * 0.5 +
+                           ((2.0 * PI * voice.phase_left * 1.101).sin() * 0.5 + 0.5) * 0.5;
+            let lfo_right = ((2.0 * PI * voice.phase_right).sin() * 0.5 + 0.51) * 0.5 +
+                            ((2.0 * PI * voice.phase_right * 1.1).sin() * 0.5 + 0.5) * 0.5;
 
             let delay_left = (voice.smooth_depth * self.sample_rate * lfo_left).min(self.size as f32 - 1.0);
             let delay_right = (voice.smooth_depth * self.sample_rate * lfo_right).min(self.size as f32 - 1.0);
@@ -225,28 +230,16 @@ impl Chorus {
         (left_output, right_output)
     }
 
-    fn cubic_interpolation(&self, delay_left: f32, delay_right: f32) -> (f32, f32) {
-        let index_left = (self.size as f32 + self.index as f32 - delay_left) as usize % self.size;
-        let index_right = (self.size as f32 + self.index as f32 - delay_right) as usize % self.size;
+    pub fn set_feedback(&mut self, feedback: f32) {
+        self.feedback = feedback.clamp(0.0, 0.99);
+    }
 
-        let frac_left = delay_left.fract();
-        let frac_right = delay_right.fract();
+    pub fn set_wet_dry_mix(&mut self, mix: f32) {
+        self.wet_dry_mix = mix.clamp(0.0, 1.0);
+    }
 
-        let sample_left = cubic_interpolate(&[
-            self.buffer_left[(index_left + self.size - 1) % self.size],
-            self.buffer_left[index_left],
-            self.buffer_left[(index_left + 1) % self.size],
-            self.buffer_left[(index_left + 2) % self.size],
-        ], frac_left);
-
-        let sample_right = cubic_interpolate(&[
-            self.buffer_right[(index_right + self.size - 1) % self.size],
-            self.buffer_right[index_right],
-            self.buffer_right[(index_right + 1) % self.size],
-            self.buffer_right[(index_right + 2) % self.size],
-        ], frac_right);
-
-        (sample_left, sample_right)
+    pub fn set_drive(&mut self, drive: f32) {
+        self.saturation.set_drive(drive);
     }
 }
 
@@ -322,13 +315,19 @@ impl Saturation {
     fn process(&self, input: f32) -> f32 {
         (input * self.drive).tanh()
     }
+
+    fn set_drive(&mut self, drive: f32) {
+        self.drive = drive.clamp(1.0, 10.0);
+    }
 }
 
 impl Voice {
-    fn new(rate: f32, depth: f32) -> Self {
+    fn new(rate_left: f32, rate_right: f32, depth: f32) -> Self {
         Self {
-            phase: rand::thread_rng().gen(),
-            rate,
+            phase_left: rand::thread_rng().gen(),
+            phase_right: rand::thread_rng().gen(),
+            rate_left,
+            rate_right,
             depth,
             smooth_depth: depth,
         }
