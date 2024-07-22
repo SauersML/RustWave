@@ -4,6 +4,8 @@ mod ui;
 mod voice;
 mod voice_manager;
 mod filter;
+mod reverb;
+mod chorus;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat, SizedSample};
@@ -75,10 +77,12 @@ where
     T: Sample + FromSample<f32>,
 {
     for frame in output.chunks_mut(channels) {
-        let value = voice_manager.lock().render_next();
-        let value = T::from_sample(value);
-        for sample in frame.iter_mut() {
-            *sample = value;
+        let (left, right) = voice_manager.lock().render_next();
+        let left_sample = T::from_sample(left);
+        let right_sample = T::from_sample(right);
+
+        for (i, sample) in frame.iter_mut().enumerate() {
+            *sample = if i % 2 == 0 { left_sample } else { right_sample };
         }
     }
 }

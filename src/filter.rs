@@ -18,7 +18,7 @@ impl LadderFilter {
     pub fn new(sample_rate: f32) -> Self {
         let mut filter = Self {
             sample_rate,
-            cutoff: 1000.0,
+            cutoff: 15000.0,
             resonance: 0.0,
             drive: 1.0,
             saturation: 1.0,

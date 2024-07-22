@@ -1,13 +1,19 @@
 use crate::voice::Voice;
+use crate::reverb::Reverb;
+use crate::chorus::{Chorus, ChorusMode};
 
 pub struct VoiceManager {
     pub voices: Vec<Voice>,
+    reverb: Reverb,
+    chorus: Chorus,
 }
 
 impl VoiceManager {
     pub fn new(sample_rate: f32, num_voices: usize) -> Self {
         Self {
             voices: (0..num_voices).map(|_| Voice::new(sample_rate)).collect(),
+            reverb: Reverb::new(sample_rate, 100.0), // 100ms max delay
+            chorus: Chorus::new(sample_rate),
         }
     }
 
@@ -32,10 +38,6 @@ impl VoiceManager {
                 voice.release();
             }
         }
-    }
-
-    pub fn render_next(&mut self) -> f32 {
-        self.voices.iter_mut().map(|v| v.render_next()).sum::<f32>() / self.voices.len() as f32
     }
 
     // Helper method to find the oldest voice
@@ -65,5 +67,27 @@ impl VoiceManager {
         for voice in &mut self.voices {
             voice.filter.set_saturation(saturation);
         }
+    }
+
+    pub fn render_next(&mut self) -> (f32, f32) {
+        let voice_output = self.voices.iter_mut().map(|v| v.render_next()).sum::<f32>() / self.voices.len() as f32;
+        let reverb_output = self.reverb.process(voice_output);
+        self.chorus.process(reverb_output)
+    }
+
+    pub fn set_chorus_mode(&mut self, mode: ChorusMode) {
+        self.chorus.set_mode(mode);
+    }
+
+    pub fn set_reverb_decay(&mut self, decay: f32) {
+        self.reverb.set_decay(decay);
+    }
+
+    pub fn set_chorus_rate(&mut self, rate: f32) {
+        self.chorus.set_rate(rate);
+    }
+
+    pub fn set_chorus_depth(&mut self, depth: f32) {
+        self.chorus.set_depth(depth);
     }
 }

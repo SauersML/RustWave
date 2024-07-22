@@ -3,6 +3,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use crate::oscillator::{Oscillator, Waveform};
 use crate::voice_manager::VoiceManager;
+use crate::chorus::ChorusMode;
 
 const OCTAVES: usize = 3;
 const WHITE_KEY_INDICES: [usize; 7] = [0, 2, 4, 5, 7, 9, 11];
@@ -23,6 +24,10 @@ pub struct SynthUI {
     filter_saturation: f32,
     active_mouse_note: Option<u8>,
     voice_manager: Arc<Mutex<VoiceManager>>,
+    reverb_decay: f32,
+    chorus_rate: f32,
+    chorus_depth: f32,
+    chorus_mode: ChorusMode,
 }
 
 impl SynthUI {
@@ -37,13 +42,61 @@ impl SynthUI {
             decay: 0.1,
             sustain: 0.7,
             release: 0.2,
-            filter_cutoff: 1000.0,
+            filter_cutoff: 15000.0,
             filter_resonance: 0.0,
             filter_drive: 1.0,
-            filter_saturation: 3.0,
+            filter_saturation: 1.0,
             active_mouse_note: None,
+            reverb_decay: 0.5,
+            chorus_rate: 0.5,
+            chorus_depth: 0.3,
+            chorus_mode: ChorusMode::Off,
         }
     }
+
+
+    fn draw_effects_controls(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Reverb Decay");
+                    if ui.add(egui::Slider::new(&mut self.reverb_decay, 0.0..=0.99)).changed() {
+                        self.voice_manager.lock().set_reverb_decay(self.reverb_decay);
+                    }
+                });
+            });
+
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Chorus Mode");
+                    for mode in [ChorusMode::Off, ChorusMode::I, ChorusMode::II, ChorusMode::III, ChorusMode::IV].iter() {
+                        if ui.radio_value(&mut self.chorus_mode, *mode, format!("{:?}", mode)).clicked() {
+                            self.voice_manager.lock().set_chorus_mode(self.chorus_mode);
+                        }
+                    }
+                });
+            });
+
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Chorus Rate");
+                    if ui.add(egui::Slider::new(&mut self.chorus_rate, 0.1..=10.0).logarithmic(true)).changed() {
+                        self.voice_manager.lock().set_chorus_rate(self.chorus_rate);
+                    }
+                });
+            });
+
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label("Chorus Depth");
+                    if ui.add(egui::Slider::new(&mut self.chorus_depth, 0.0..=1.0)).changed() {
+                        self.voice_manager.lock().set_chorus_depth(self.chorus_depth);
+                    }
+                });
+            });
+        });
+    }
+
 
     pub fn update(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -55,6 +108,8 @@ impl SynthUI {
                 self.draw_envelope_controls(ui);
                 ui.add_space(10.0);
                 self.draw_filter_controls(ui);
+                ui.add_space(10.0);
+                self.draw_effects_controls(ui); // Add this line
                 ui.add_space(10.0);
                 self.draw_keyboard(ui);
                 self.handle_keyboard_input(ctx);
@@ -317,7 +372,7 @@ impl SynthUI {
             Key::Z, Key::S, Key::X, Key::D, Key::C, Key::V, Key::G, Key::B, Key::H, Key::N, Key::J, Key::M,
             Key::Q, Key::Num2, Key::W, Key::Num3, Key::E, Key::R, Key::Num5, Key::T, Key::Num6, Key::Y, Key::Num7, Key::U,
         ];
-    
+
         for &key in KEYS.iter() {
             if ctx.input(|i| i.key_pressed(key)) {
                 if let Some(note) = self.key_to_note(key) {
