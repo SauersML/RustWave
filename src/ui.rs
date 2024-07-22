@@ -200,7 +200,7 @@ impl SynthUI {
             ui.group(|ui| {
                 ui.vertical(|ui| {
                     ui.label("Filter Saturation");
-                    if ui.add(egui::Slider::new(&mut self.filter_saturation, 1.0..=10.0)).changed() {
+                    if ui.add(egui::Slider::new(&mut self.filter_saturation, 0.00..=2.00)).changed() {
                         self.voice_manager.lock().set_filter_saturation(self.filter_saturation);
                     }
                 });
