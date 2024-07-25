@@ -51,7 +51,7 @@ impl Oscillator {
 
         // Apply soft clipping for analog-like distortion
         let clipped_sample = self.soft_clip(raw_sample);
-        
+
         clipped_sample * volume
     }
 

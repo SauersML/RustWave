@@ -1,5 +1,6 @@
 use eframe::egui::{self, Color32, Rect, Stroke, Vec2, Key};
 use std::sync::Arc;
+use std::collections::HashSet;
 use parking_lot::Mutex;
 use crate::oscillator::{Oscillator, Waveform};
 use crate::voice_manager::VoiceManager;
@@ -29,6 +30,7 @@ pub struct SynthUI {
     chorus_mode: ChorusMode,
     reverb_decay: f32,
     reverb_wet: f32,
+    pressed_keys: HashSet<Key>,
 }
 
 impl SynthUI {
@@ -53,6 +55,7 @@ impl SynthUI {
             chorus_mode: ChorusMode::Off,
             reverb_decay: 0.5,
             reverb_wet: 0.5,
+            pressed_keys: HashSet::new(),
         }
     }
 
@@ -121,7 +124,7 @@ impl SynthUI {
                 ui.add_space(10.0);
                 self.draw_filter_controls(ui);
                 ui.add_space(10.0);
-                self.draw_effects_controls(ui); // Add this line
+                self.draw_effects_controls(ui);
                 ui.add_space(10.0);
                 self.draw_keyboard(ui);
                 self.handle_keyboard_input(ctx);
@@ -386,18 +389,16 @@ impl SynthUI {
         ];
 
         for &key in KEYS.iter() {
-            if ctx.input(|i| i.key_pressed(key)) {
+            if ctx.input(|i| i.key_pressed(key)) && !self.pressed_keys.contains(&key) {
                 if let Some(note) = self.key_to_note(key) {
                     self.play_note(note);
+                    self.pressed_keys.insert(key);
                 }
             }
-        }
-
-        // Check for key releases
-        for &key in KEYS.iter() {
             if ctx.input(|i| i.key_released(key)) {
                 if let Some(note) = self.key_to_note(key) {
                     self.stop_note(note);
+                    self.pressed_keys.remove(&key);
                 }
             }
         }

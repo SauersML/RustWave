@@ -6,7 +6,7 @@ pub struct VoiceManager {
     pub voices: Vec<Voice>,
     reverb: Reverb,
     chorus: Chorus,
-    max_voices: usize,
+    active_notes: std::collections::HashSet<u8>,
 }
 
 impl VoiceManager {
@@ -15,24 +15,26 @@ impl VoiceManager {
             voices: (0..num_voices).map(|_| Voice::new(sample_rate)).collect(),
             reverb: Reverb::new(sample_rate),
             chorus: Chorus::new(sample_rate),
-            max_voices: num_voices,
+            active_notes: std::collections::HashSet::new(),
         }
     }
 
     pub fn note_on(&mut self, note: u8) {
-        self.note_off(note);
-
-        if let Some(inactive_voice) = self.voices.iter_mut().find(|v| !v.is_active()) {
-            inactive_voice.trigger(note);
-        } else if let Some(oldest_voice) = self.find_oldest_voice() {
-            oldest_voice.trigger(note);
+        if self.active_notes.insert(note) {
+            if let Some(inactive_voice) = self.voices.iter_mut().find(|v| !v.is_active()) {
+                inactive_voice.trigger(note);
+            } else if let Some(oldest_voice) = self.find_oldest_voice() {
+                oldest_voice.trigger(note);
+            }
         }
     }
 
     pub fn note_off(&mut self, note: u8) {
-        for voice in self.voices.iter_mut() {
-            if voice.note == Some(note) {
-                voice.release();
+        if self.active_notes.remove(&note) {
+            for voice in self.voices.iter_mut() {
+                if voice.note == Some(note) {
+                    voice.release();
+                }
             }
         }
     }
@@ -69,7 +71,7 @@ impl VoiceManager {
     pub fn render_next(&mut self) -> (f32, f32) {
         let mut left_output = 0.0;
         let mut right_output = 0.0;
-    
+
         let mut active_voices = 0;
         for voice in &mut self.voices {
             if voice.is_active() {
@@ -91,6 +93,9 @@ impl VoiceManager {
 
         // Mix dry and reverb signals
         let wet_amount = self.reverb.get_wet();
+
+
+
         let left = left_output * (1.0 - wet_amount) + reverb_left * wet_amount;
         let right = right_output * (1.0 - wet_amount) + reverb_right * wet_amount;
 
@@ -104,8 +109,6 @@ impl VoiceManager {
 
         (left, right)
     }
-
-
 
 
 
