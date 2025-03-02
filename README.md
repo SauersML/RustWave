@@ -22,7 +22,7 @@ RustWave aims to provide a realistic emulation of classic analog synthesizer sou
 
 1. Clone the repository:
    ```
-   git clone https://github.com/ScottSauers/RustWave.git
+   git clone https://github.com/SauersML/RustWave.git
    cd rustwave
    ```
 
