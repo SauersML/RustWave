@@ -1,5 +1,5 @@
 [package]
-name = "rustsynth"
+name = "RustWave"
 version = "0.1.0"
 edition = "2021"
 
