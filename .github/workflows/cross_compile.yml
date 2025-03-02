@@ -49,11 +49,12 @@ jobs:
           # Windows builds
           - os: windows-latest
             target: x86_64-pc-windows-gnu
-            use_cross: true
+            use_cross: false
             artifact_suffix: "windows_x86_64_gnu"
+
           - os: windows-latest
             target: i686-pc-windows-gnu
-            use_cross: true
+            use_cross: false
             artifact_suffix: "windows_i686_gnu"
 
     runs-on: ${{ matrix.os }}
@@ -75,6 +76,12 @@ jobs:
         run: |
           cargo install cross --git https://github.com/cross-rs/cross
 
+      - name: Install ALSA dependencies (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
+
       # 3) Build the project
       - name: Build
         run: |
@@ -88,19 +95,20 @@ jobs:
       # 4) Collect and upload build artifacts
       - name: Upload artifact
         run: |
-          # Name of final binary
           BIN_NAME="RustWave"
-          
-          # On Windows, it will produce .exe
           SUFFIX=""
           if [[ "${{ matrix.target }}" == *"windows"* ]]; then
             SUFFIX=".exe"
           fi
           
           ARTIFACT="target/${{ matrix.target }}/release/${BIN_NAME}${SUFFIX}"
-
-          # Rename/copy to a friendlier artifact name:
-          cp "$ARTIFACT" "${BIN_NAME}-${{ matrix.artifact_suffix }}${SUFFIX}"
+          
+          if [ -f "$ARTIFACT" ]; then
+            cp "$ARTIFACT" "${BIN_NAME}-${{ matrix.artifact_suffix }}${SUFFIX}"
+          else
+            echo "Artifact not found: $ARTIFACT"
+            exit 1
+          fi
         shell: bash
 
       - name: Upload artifact to GitHub
