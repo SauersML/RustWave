@@ -98,13 +98,14 @@ jobs:
 
       # 5) Build your binary
       - name: Build
+        shell: bash
         run: |
           if [ "${{ matrix.use_cross }}" = "true" ]; then
             cross build --release --target ${{ matrix.target }} --bin RustWave
           else
             cargo build --release --target ${{ matrix.target }} --bin RustWave
           fi
-
+    
       # 6) Copy the artifact to a friendly name
       - name: Stage artifact
         run: |
