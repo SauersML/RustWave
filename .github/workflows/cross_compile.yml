@@ -104,7 +104,7 @@ jobs:
         shell: bash
 
       - name: Upload artifact to GitHub
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
           path: ${{ format('{0}-{1}{2}', 'RustWave', matrix.artifact_suffix, contains(matrix.target, 'windows') && '.exe' || '') }}
