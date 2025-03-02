@@ -1,0 +1,110 @@
+name: Cross-Compile
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    # "fail-fast: false" so all builds are attempted even if one fails.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux builds (using cross)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            use_cross: true
+            artifact_suffix: "linux_x86_64"
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            use_cross: true
+            artifact_suffix: "linux_x86_64_musl"
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            use_cross: true
+            artifact_suffix: "linux_aarch64"
+          - os: ubuntu-latest
+            target: i686-unknown-linux-gnu
+            use_cross: true
+            artifact_suffix: "linux_i686"
+
+          - os: ubuntu-latest
+            target: x86_64-unknown-freebsd
+            use_cross: true
+            artifact_suffix: "freebsd_x86_64"
+
+          # macOS builds (native cargo)
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            use_cross: false
+            artifact_suffix: "macOS_x86_64"
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            use_cross: false
+            artifact_suffix: "macOS_arm64"
+
+          # Windows builds
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+            use_cross: true
+            artifact_suffix: "windows_x86_64_gnu"
+          - os: windows-latest
+            target: i686-pc-windows-gnu
+            use_cross: true
+            artifact_suffix: "windows_i686_gnu"
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      # 1) Install Rust with the appropriate target(s).
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Install exactly the target triple we need for each matrix entry.
+          targets: ${{ matrix.target }}
+
+      # 2) Install cross if needed
+      - name: Install cross
+        if: ${{ matrix.use_cross }}
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
+
+      # 3) Build the project
+      - name: Build
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+        shell: bash
+
+      # 4) Collect and upload build artifacts
+      - name: Upload artifact
+        run: |
+          # Name of final binary
+          BIN_NAME="RustWave"
+          
+          # On Windows, it will produce .exe
+          SUFFIX=""
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+            SUFFIX=".exe"
+          fi
+          
+          ARTIFACT="target/${{ matrix.target }}/release/${BIN_NAME}${SUFFIX}"
+
+          # Rename/copy to a friendlier artifact name:
+          cp "$ARTIFACT" "${BIN_NAME}-${{ matrix.artifact_suffix }}${SUFFIX}"
+        shell: bash
+
+      - name: Upload artifact to GitHub
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ format('{0}-{1}{2}', 'RustWave', matrix.artifact_suffix, contains(matrix.target, 'windows') && '.exe' || '') }}
