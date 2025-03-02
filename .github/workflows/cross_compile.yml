@@ -8,16 +8,16 @@ on:
 
 jobs:
   build:
-    # "fail-fast: false" so all builds are attempted even if one fails.
+    # "fail-fast: false" so if one target fails, the others still build.
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux builds (using cross)
+          # Linux (cross)
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             use_cross: true
-            artifact_suffix: "linux_x86_64"
+            artifact_suffix: "linux_x86_64_gnu"
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             use_cross: true
@@ -31,12 +31,7 @@ jobs:
             use_cross: true
             artifact_suffix: "linux_i686"
 
-          - os: ubuntu-latest
-            target: x86_64-unknown-freebsd
-            use_cross: true
-            artifact_suffix: "freebsd_x86_64"
-
-          # macOS builds (native cargo)
+          # macOS (native Cargo)
           - os: macos-latest
             target: x86_64-apple-darwin
             use_cross: false
@@ -46,12 +41,11 @@ jobs:
             use_cross: false
             artifact_suffix: "macOS_arm64"
 
-          # Windows builds
+          # Windows (native Cargo)
           - os: windows-latest
             target: x86_64-pc-windows-gnu
             use_cross: false
             artifact_suffix: "windows_x86_64_gnu"
-
           - os: windows-latest
             target: i686-pc-windows-gnu
             use_cross: false
@@ -60,57 +54,76 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Checkout source
+      # 1) Check out your Rust project
+      - name: Check out source
         uses: actions/checkout@v4
 
-      # 1) Install Rust with the appropriate target(s).
+      # 2) Create a Cross.toml on the fly if "use_cross" is true
+      #    so we can install ALSA dev libs inside cross's Docker images.
+      - name: Create Cross.toml (for ALSA)
+        if: ${{ matrix.use_cross }}
+        run: |
+          cat <<EOF > Cross.toml
+          [target.x86_64-unknown-linux-gnu]
+          pre-build = [
+            "apt-get update && apt-get install -y libasound2-dev"
+          ]
+
+          [target.x86_64-unknown-linux-musl]
+          pre-build = [
+            "apt-get update && apt-get install -y libasound2-dev"
+          ]
+
+          [target.aarch64-unknown-linux-gnu]
+          pre-build = [
+            "apt-get update && apt-get install -y libasound2-dev"
+          ]
+
+          [target.i686-unknown-linux-gnu]
+          pre-build = [
+            "apt-get update && apt-get install -y libasound2-dev"
+          ]
+          EOF
+
+      # 3) Install the Rust toolchain + the needed target
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          # Install exactly the target triple we need for each matrix entry.
           targets: ${{ matrix.target }}
 
-      # 2) Install cross if needed
+      # 4) Install cross (only if "use_cross" is true)
       - name: Install cross
         if: ${{ matrix.use_cross }}
-        run: |
-          cargo install cross --git https://github.com/cross-rs/cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
-      - name: Install ALSA dependencies (Linux only)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev
-
-      # 3) Build the project
+      # 5) Build your binary
       - name: Build
         run: |
           if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }}
+            cross build --release --target ${{ matrix.target }} --bin RustWave
           else
-            cargo build --release --target ${{ matrix.target }}
+            cargo build --release --target ${{ matrix.target }} --bin RustWave
           fi
-        shell: bash
 
-      # 4) Collect and upload build artifacts
-      - name: Upload artifact
+      # 6) Copy the artifact to a friendly name
+      - name: Stage artifact
         run: |
           BIN_NAME="RustWave"
           SUFFIX=""
           if [[ "${{ matrix.target }}" == *"windows"* ]]; then
             SUFFIX=".exe"
           fi
-          
+
           ARTIFACT="target/${{ matrix.target }}/release/${BIN_NAME}${SUFFIX}"
-          
+
           if [ -f "$ARTIFACT" ]; then
             cp "$ARTIFACT" "${BIN_NAME}-${{ matrix.artifact_suffix }}${SUFFIX}"
           else
             echo "Artifact not found: $ARTIFACT"
             exit 1
           fi
-        shell: bash
 
+      # 7) Upload the artifact
       - name: Upload artifact to GitHub
         uses: actions/upload-artifact@v4
         with:
