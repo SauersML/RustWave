@@ -93,11 +93,53 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Output device: {}", device.name()?);
 
-    let mut supported_configs_range = device.supported_output_configs().expect("error while querying configs");
-    let supported_config = supported_configs_range.next().expect("no supported config?!").with_max_sample_rate();
+    // Get all supported configs and find the best one to use
+    
+    // Preferred formats in order (most preferred first)
+    let preferred_formats = [
+        (SampleFormat::F32, 48000),
+        (SampleFormat::I16, 48000),
+        (SampleFormat::F32, 44100),
+        (SampleFormat::I16, 44100),
+    ];
+    
+    // Find the best config
+    let mut selected_config = None;
+    let mut fallback_config = None;
 
-    println!("Default output config: {:?}", supported_config);
-
+    // First try to find one of our preferred configs
+    for supported_config in device.supported_output_configs().expect("error querying configs") {
+        // Save the first config as a fallback
+        if fallback_config.is_none() {
+            fallback_config = Some(supported_config.clone());
+        }
+        
+        let format = supported_config.sample_format();
+        let min_rate = supported_config.min_sample_rate().0;
+        let max_rate = supported_config.max_sample_rate().0;
+        
+        // Check if this config matches any of our preferred formats
+        for &(preferred_format, preferred_rate) in &preferred_formats {
+            if format == preferred_format && 
+               min_rate <= preferred_rate && max_rate >= preferred_rate {
+                // Found a match with one of our preferred configs
+                selected_config = Some(supported_config.with_sample_rate(cpal::SampleRate(preferred_rate)));
+                break;
+            }
+        }
+        
+        if selected_config.is_some() {
+            break;
+        }
+    }
+    
+    // Use fallback if no preferred config found
+    let supported_config = selected_config.unwrap_or_else(|| {
+        fallback_config.expect("no supported config found").with_max_sample_rate()
+    });
+    
+    println!("Selected output config: {:?}", supported_config);
+    
     let sample_format = supported_config.sample_format();
     let config: cpal::StreamConfig = supported_config.into();
 
@@ -105,7 +147,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         SampleFormat::F32 => run::<f32>(&device, &config)?,
         SampleFormat::I16 => run::<i16>(&device, &config)?,
         SampleFormat::U16 => run::<u16>(&device, &config)?,
-        _ => panic!("Unsupported sample format: {:?}", sample_format),
+        SampleFormat::U8 => run::<u8>(&device, &config)?,
+        SampleFormat::I8 => run::<i8>(&device, &config)?,
+        _ => {
+            println!("Unsupported sample format: {:?}, trying to use a different format...", sample_format);
+            
+            // Try to find a supported format
+            let mut configs = device.supported_output_configs()
+                .expect("error while querying configs");
+            
+            while let Some(config) = configs.next() {
+                let format = config.sample_format();
+                if format == SampleFormat::F32 || format == SampleFormat::I16 || 
+                   format == SampleFormat::U16 || format == SampleFormat::U8 || 
+                   format == SampleFormat::I8 {
+                    let stream_config = config.with_max_sample_rate().into();
+                    println!("Trying alternative config: {:?}", config);
+                    
+                    match format {
+                        SampleFormat::F32 => return run::<f32>(&device, &stream_config),
+                        SampleFormat::I16 => return run::<i16>(&device, &stream_config),
+                        SampleFormat::U16 => return run::<u16>(&device, &stream_config),
+                        SampleFormat::U8 => return run::<u8>(&device, &stream_config),
+                        SampleFormat::I8 => return run::<i8>(&device, &stream_config),
+                        _ => continue,
+                    }
+                }
+            }
+            
+            panic!("Could not find any usable audio configuration");
+        }
     }
 
     Ok(())
