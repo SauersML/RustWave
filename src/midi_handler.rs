@@ -94,7 +94,7 @@ impl MidiHandler {
             connection: None,
             available_ports: Vec::new(),
             sender,
-            receiver,
+            receiver.clone,
             voice_manager: None,
         };
 
