@@ -86,6 +86,7 @@ impl MidiHandler {
     /// ```
     pub fn new() -> Result<(Self, Receiver<MidiEvent>), Box<dyn Error>> {
         let (sender, receiver) = bounded(128);
+        let receiver_clone = receiver.clone();
     
         let midi_in = MidiInput::new("rust_synth_midi_input")?;
 
@@ -113,7 +114,7 @@ impl MidiHandler {
             println!("No IAC Driver found for auto-connection");
         }
         
-        Ok((handler, receiver.clone()))
+        Ok((handler, receiver_clone))
     }
     
     /// Finds the index of the IAC Driver in the available ports list
