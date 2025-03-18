@@ -1,11 +1,430 @@
+// src/midi_handler.rs
+//
+// This file implements MIDI input functionality for the synthesizer, allowing connection
+// to MIDI keyboards and other controllers. The implementation uses the midir crate for
+// cross-platform MIDI device access and midly for MIDI message parsing.
+
+use crossbeam_channel::{bounded, Receiver, Sender};
+use midir::{Ignore, MidiInput, MidiInputConnection, MidiInputPort};
+use midly::{live::LiveEvent, MidiMessage};
+use parking_lot::Mutex; // Using parking_lot::Mutex instead of std::sync::Mutex as per project convention
+use std::error::Error;
+use std::sync::Arc;
+
+// Import the VoiceManager from our project
+use crate::voice_manager::VoiceManager;
+
+/// Represents the types of MIDI events our synthesizer will process.
+/// 
+/// Currently we're handling the basic note events, but this enum can be extended
+/// in the future to handle control changes, pitch bend, etc.
+#[derive(Debug, Clone)]
+pub enum MidiEvent {
+    /// Note On event with note number (0-127) and velocity (0-127)
+    NoteOn { note: u8, velocity: u8 },
+    
+    /// Note Off event with note number (0-127) and velocity (0-127)
+    /// Note: Most MIDI keyboards send velocity with Note Off, but we don't use it currently
+    NoteOff { note: u8, velocity: u8 },
+    
+    // Future expansion possibilities:
+    // ControlChange { controller: u8, value: u8 },
+    // PitchBend { value: i16 },
+    // ModWheel { value: u8 },
+}
+
+/// Manages MIDI input device connections and routes MIDI messages to the synthesizer.
+///
+/// The MidiHandler provides two methods of operation:
+/// 1. Direct connection to the VoiceManager (preferred for this project)
+/// 2. Channel-based communication
+///
+/// The direct connection is more efficient for our needs since it doesn't require
+/// additional message passing between threads.
 pub struct MidiHandler {
-    // TODO: Add MIDI handling parameters
+    /// The MidiInput instance used for scanning available ports.
+    /// This is kept separate from the connection to allow rescanning while connected.
+    midi_in: Option<MidiInput>,
+    
+    /// The active MIDI input connection. When this is Some, we are connected to a device.
+    connection: Option<MidiInputConnection<()>>,
+    
+    /// List of available MIDI ports with their indices, names, and port objects.
+    /// This is populated by the scan_devices() method.
+    available_ports: Vec<(usize, String, MidiInputPort)>,
+    
+    /// Channel for sending MIDI events to other threads if needed.
+    /// This is an alternative to the direct VoiceManager approach.
+    sender: Sender<MidiEvent>,
+    
+    /// Reference to the VoiceManager for direct event handling.
+    /// When this is set, MIDI events directly trigger voice_manager methods.
+    voice_manager: Option<Arc<Mutex<VoiceManager>>>,
 }
 
 impl MidiHandler {
-    pub fn new() -> Self {
-        Self {}
+    /// Creates a new MidiHandler and returns the handler along with a receiver
+    /// for MIDI events.
+    ///
+    /// # Returns
+    /// 
+    /// A tuple containing:
+    /// - The MidiHandler instance
+    /// - A Receiver<MidiEvent> that can be used to receive MIDI events in another thread
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if initializing the MIDI system fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// let (mut midi_handler, midi_receiver) = MidiHandler::new().unwrap();
+    /// ```
+    pub fn new() -> Result<(Self, Receiver<MidiEvent>), Box<dyn Error>> {
+        // Create a bounded channel with a buffer size of 128 events
+        // This should be more than enough for normal MIDI usage without blocking
+        let (sender, receiver) = bounded(128);
+
+        // Initialize the MIDI input system with a client name that will be visible
+        // to other MIDI applications on the system
+        let midi_in = MidiInput::new("rust_synth_midi_input")?;
+        
+        Ok((
+            Self {
+                midi_in: Some(midi_in),  // Store the MidiInput instance for future use
+                connection: None,        // No connection initially
+                available_ports: Vec::new(), // Empty list of ports until scan_devices() is called
+                sender,                  // Store the sender side of the channel
+                voice_manager: None,     // No voice manager reference initially
+            },
+            receiver                     // Return the receiver side of the channel
+        ))
     }
 
-    // TODO: Implement MIDI message processing
+    /// Sets the voice manager for direct MIDI event handling.
+    ///
+    /// When set, incoming MIDI events will directly trigger methods on the voice manager
+    /// without going through the channel. This is the preferred approach for this project
+    /// as it simplifies the architecture and avoids extra message passing.
+    ///
+    /// # Parameters
+    ///
+    /// * `voice_manager` - An Arc<Mutex<VoiceManager>> reference, which matches how
+    ///                     VoiceManager is used throughout the project
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// let voice_manager = Arc::new(Mutex::new(VoiceManager::new(sample_rate, 8)));
+    /// midi_handler.set_voice_manager(Arc::clone(&voice_manager));
+    /// ```
+    pub fn set_voice_manager(&mut self, voice_manager: Arc<Mutex<VoiceManager>>) {
+        // Store the reference to the voice manager for use in the MIDI callback
+        self.voice_manager = Some(voice_manager);
+        
+        // Note: This works because our voice_manager is already designed to be
+        // accessed safely from multiple threads via Arc<Mutex<>>
+    }
+    
+    /// Scans for available MIDI input devices and updates the internal list.
+    ///
+    /// This method queries the operating system's MIDI system to find all available
+    /// MIDI input devices, including physical MIDI keyboards and virtual MIDI ports
+    /// created by other software.
+    ///
+    /// # Returns
+    ///
+    /// Ok(()) if successful, or an error if scanning fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// midi_handler.scan_devices().unwrap();
+    /// let devices = midi_handler.get_devices();
+    /// for (index, name) in devices {
+    ///     println!("{}: {}", index, name);
+    /// }
+    /// ```
+    pub fn scan_devices(&mut self) -> Result<(), Box<dyn Error>> {
+        // Create a new MidiInput instance if needed
+        // This we have a fresh view of the MIDI system
+        if self.midi_in.is_none() {
+            // Initialize with a client name that identifies our application to the system
+            self.midi_in = Some(MidiInput::new("rust_synth_midi_input")?);
+        }
+        
+        // Get a reference to the MidiInput instance
+        let midi_in = self.midi_in.as_ref().unwrap();
+        
+        // Clear the current list of ports before scanning
+        self.available_ports.clear();
+        
+        // Iterate through all available ports
+        // midir::MidiInput::ports() queries the OS for all available MIDI input devices
+        for (i, port) in midi_in.ports().into_iter().enumerate() {
+            // Try to get the name of each port
+            match midi_in.port_name(&port) {
+                Ok(name) => {
+                    // Store the port index, name, and port object
+                    self.available_ports.push((i, name, port));
+                },
+                Err(err) => {
+                    // Log errors but continue processing other ports
+                    eprintln!("Error getting port name: {}", err);
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Returns a list of available MIDI devices for display in the UI.
+    ///
+    /// This method converts the internal port information into a simpler format
+    /// containing just the index and name of each device, suitable for displaying
+    /// in a dropdown menu or list in the UI.
+    ///
+    /// # Returns
+    ///
+    /// A Vec of tuples containing (index, name) for each available MIDI device.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// for (index, name) in midi_handler.get_devices() {
+    ///     println!("{}: {}", index, name);
+    /// }
+    /// ```
+    pub fn get_devices(&self) -> Vec<(usize, String)> {
+        // Map the internal port list to a simpler format for UI display
+        // This extracts just the index and name, omitting the technical MidiInputPort object
+        self.available_ports
+            .iter()
+            .map(|(idx, name, _)| (*idx, name.clone()))
+            .collect()
+    }
+    
+    /// Connects to a MIDI input device by its index in the available devices list.
+    ///
+    /// This method establishes a connection to the selected MIDI device and sets up
+    /// a callback to handle incoming MIDI messages. When a MIDI message is received,
+    /// it will be parsed and either:
+    /// 1. Directly handled by calling methods on the VoiceManager (if set), or
+    /// 2. Sent through the channel for processing elsewhere
+    ///
+    /// # Parameters
+    ///
+    /// * `index` - The index of the device to connect to, from the list returned
+    ///             by get_devices()
+    ///
+    /// # Returns
+    ///
+    /// Ok(()) if the connection was successful, or an error if it failed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The index is out of bounds
+    /// - Creating a new MidiInput fails
+    /// - Connecting to the port fails
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// midi_handler.scan_devices().unwrap();
+    /// if !midi_handler.get_devices().is_empty() {
+    ///     midi_handler.connect_to_device(0).unwrap(); // Connect to the first device
+    /// }
+    /// ```
+    pub fn connect_to_device(&mut self, index: usize) -> Result<(), Box<dyn Error>> {
+        // Disconnect any existing connection first to avoid resource leaks
+        self.disconnect();
+        
+        // Verify the index is valid
+        if index >= self.available_ports.len() {
+            return Err("Invalid MIDI device index".into());
+        }
+        
+        // Get the port and name for the selected device
+        let (_, name, port) = &self.available_ports[index];
+        let port = port.clone(); // Clone the port object for use in the connection
+        let port_name = name.clone(); // Clone the name for the success message
+        
+        // Create a new MidiInput instance for the connection
+        // Note: midir requires a fresh MidiInput instance for each connection,
+        // which is why we create a new one here rather than reusing self.midi_in
+        let mut midi_in = MidiInput::new("rust_synth_midi_connection")?;
+        
+        // Configure the input to not ignore any MIDI message types
+        midi_in.ignore(Ignore::None);
+        
+        // Clone the sender and voice_manager for use in the callback closure
+        // This is necessary because the closure will outlive this function call
+        let sender = self.sender.clone();
+        let voice_manager = self.voice_manager.clone();
+        
+        // Connect to the MIDI input port and set up the callback
+        // This callback will be called whenever a MIDI message is received
+        let connection = midi_in.connect(
+            &port,
+            "rust_synth", // Connection name visible to other MIDI applications
+            move |_timestamp, message, _| {
+                // This closure is called for each incoming MIDI message
+                
+                // Try to parse the raw MIDI bytes using midly
+                if let Ok(event) = LiveEvent::parse(message) {
+                    // Process standard MIDI channel messages
+                    if let LiveEvent::Midi { channel: _, message } = event {
+                        match message {
+                            // Handle Note On messages
+                            MidiMessage::NoteOn { key, vel } => {
+                                let note = key.as_int();
+                                let velocity = vel.as_int();
+                                
+                                // MIDI spec: Note On with velocity 0 is equivalent to Note Off
+                                if velocity > 0 {
+                                    // This is a genuine Note On message
+                                    if let Some(vm) = &voice_manager {
+                                        // Direct approach: call note_on() on the VoiceManager
+                                        vm.lock().note_on(note);
+                                    } else {
+                                        // Channel approach: send a NoteOn event through the channel
+                                        let _ = sender.send(MidiEvent::NoteOn { 
+                                            note, 
+                                            velocity 
+                                        });
+                                    }
+                                } else {
+                                    // This is a Note Off message disguised as Note On with velocity 0
+                                    if let Some(vm) = &voice_manager {
+                                        vm.lock().note_off(note);
+                                    } else {
+                                        let _ = sender.send(MidiEvent::NoteOff { 
+                                            note, 
+                                            velocity: 0 
+                                        });
+                                    }
+                                }
+                            },
+                            // Handle explicit Note Off messages
+                            MidiMessage::NoteOff { key, vel: _ } => {
+                                let note = key.as_int();
+                                
+                                if let Some(vm) = &voice_manager {
+                                    vm.lock().note_off(note);
+                                } else {
+                                    let _ = sender.send(MidiEvent::NoteOff { 
+                                        note, 
+                                        velocity: 0 // We don't currently use Note Off velocity
+                                    });
+                                }
+                            },
+                            // Other message types can be handled here in the future
+                            // For example:
+                            // MidiMessage::Controller { controller, value } => { ... }
+                            // MidiMessage::PitchBend { bend } => { ... }
+                            _ => {} // Ignore other message types for now
+                        }
+                    }
+                }
+            },
+            (),
+        )?;
+        
+        println!("Connected to MIDI device: {}", port_name);
+        self.connection = Some(connection);
+        
+        Ok(())
+    }
+    
+    /// Disconnects from the current MIDI device if connected.
+    ///
+    /// This method safely closes the current MIDI connection and releases resources.
+    /// It's safe to call even if no device is currently connected.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// midi_handler.disconnect();
+    /// ```
+    pub fn disconnect(&mut self) {
+        // Take the connection option, which moves ownership out of self.connection
+        // and leaves None in its place
+        if let Some(conn) = self.connection.take() {
+            // Dropping the connection object closes the connection
+            drop(conn);
+            println!("Disconnected from MIDI device");
+        }
+        // If there was no connection, this method does nothing
+    }
+    
+    /// Processes pending MIDI events from the channel.
+    ///
+    /// This method should be called regularly (e.g., from the audio thread) if
+    /// using the channel-based approach rather than direct voice manager access.
+    /// It processes all pending MIDI events without blocking.
+    ///
+    /// Note: This method is only needed if NOT using the direct voice_manager
+    /// approach via set_voice_manager(). With our project structure, the direct
+    /// approach is preferred.
+    ///
+    /// # Parameters
+    ///
+    /// * `voice_manager` - A mutable reference to the VoiceManager to handle the events
+    ///
+    /// # Returns
+    ///
+    /// Ok(()) if successful, or an error if processing fails
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// // In your audio processing callback:
+    /// midi_handler.process_events(&mut voice_manager).unwrap();
+    /// ```
+    pub fn process_events(&self, voice_manager: &mut VoiceManager) -> Result<(), Box<dyn Error>> {
+        // Try to receive all pending MIDI events without blocking
+        // This we don't stall the audio thread if the channel is empty
+        while let Ok(event) = self.sender.try_recv() {
+            match event {
+                MidiEvent::NoteOn { note, velocity: _ } => {
+                    voice_manager.note_on(note);
+                },
+                MidiEvent::NoteOff { note, velocity: _ } => {
+                    voice_manager.note_off(note);
+                },
+                // Handle other event types here as they're added
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Checks if currently connected to a MIDI device.
+    ///
+    /// # Returns
+    ///
+    /// `true` if connected to a device, `false` otherwise
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// if midi_handler.is_connected() {
+    ///     println!("Connected to a MIDI device");
+    /// } else {
+    ///     println!("Not connected to any MIDI device");
+    /// }
+    /// ```
+    pub fn is_connected(&self) -> bool {
+        self.connection.is_some()
+    }
+}
+
+// Implement Drop to so resources are cleaned up properly when the MidiHandler is dropped
+impl Drop for MidiHandler {
+    fn drop(&mut self) {
+        // so we disconnect from any MIDI devices to avoid resource leaks
+        self.disconnect();
+    }
 }
