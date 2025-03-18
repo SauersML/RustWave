@@ -45,18 +45,21 @@ pub struct MidiHandler {
     /// The MidiInput instance used for scanning available ports.
     /// This is kept separate from the connection to allow rescanning while connected.
     midi_in: Option<MidiInput>,
-    
+
     /// The active MIDI input connection. When this is Some, we are connected to a device.
     connection: Option<MidiInputConnection<()>>,
-    
+
     /// List of available MIDI ports with their indices, names, and port objects.
     /// This is populated by the scan_devices() method.
     available_ports: Vec<(usize, String, MidiInputPort)>,
-    
+
     /// Channel for sending MIDI events to other threads if needed.
     /// This is an alternative to the direct VoiceManager approach.
     sender: Sender<MidiEvent>,
-    
+
+    /// Channel for receiving MIDI events (for the channel-based approach).
+    receiver: Receiver<MidiEvent>,
+
     /// Reference to the VoiceManager for direct event handling.
     /// When this is set, MIDI events directly trigger voice_manager methods.
     voice_manager: Option<Arc<Mutex<VoiceManager>>>,
@@ -79,21 +82,22 @@ impl MidiHandler {
     /// # Example
     ///
     /// ```rust,no_run
-    /// let (mut midi_handler, midi_receiver) = MidiHandler::new().unwrap();
+    /// let (mut midi_handler, midi_receiver) = MidiHandler::new().unwrap()
     /// ```
     pub fn new() -> Result<(Self, Receiver<MidiEvent>), Box<dyn Error>> {
         let (sender, receiver) = bounded(128);
     
         let midi_in = MidiInput::new("rust_synth_midi_input")?;
-        
+
         let mut handler = Self {
             midi_in: Some(midi_in),
             connection: None,
             available_ports: Vec::new(),
             sender,
+            receiver,
             voice_manager: None,
         };
-        
+
         // Scan for devices immediately
         handler.scan_devices()?;
         
@@ -396,7 +400,7 @@ impl MidiHandler {
     pub fn process_events(&self, voice_manager: &mut VoiceManager) -> Result<(), Box<dyn Error>> {
         // Try to receive all pending MIDI events without blocking
         // This we don't stall the audio thread if the channel is empty
-        while let Ok(event) = self.sender.try_recv() {
+        while let Ok(event) = self.receiver.try_recv() {
             match event {
                 MidiEvent::NoteOn { note, velocity: _ } => {
                     voice_manager.note_on(note);
