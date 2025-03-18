@@ -82,24 +82,44 @@ impl MidiHandler {
     /// let (mut midi_handler, midi_receiver) = MidiHandler::new().unwrap();
     /// ```
     pub fn new() -> Result<(Self, Receiver<MidiEvent>), Box<dyn Error>> {
-        // Create a bounded channel with a buffer size of 128 events
-        // This should be more than enough for normal MIDI usage without blocking
         let (sender, receiver) = bounded(128);
-
-        // Initialize the MIDI input system with a client name that will be visible
-        // to other MIDI applications on the system
+    
         let midi_in = MidiInput::new("rust_synth_midi_input")?;
         
-        Ok((
-            Self {
-                midi_in: Some(midi_in),  // Store the MidiInput instance for future use
-                connection: None,        // No connection initially
-                available_ports: Vec::new(), // Empty list of ports until scan_devices() is called
-                sender,                  // Store the sender side of the channel
-                voice_manager: None,     // No voice manager reference initially
-            },
-            receiver                     // Return the receiver side of the channel
-        ))
+        let mut handler = Self {
+            midi_in: Some(midi_in),
+            connection: None,
+            available_ports: Vec::new(),
+            sender,
+            voice_manager: None,
+        };
+        
+        // Scan for devices immediately
+        handler.scan_devices()?;
+        
+        // Attempt to auto-connect to IAC Driver if available
+        let iac_index = handler.find_iac_driver();
+        if let Some(idx) = iac_index {
+            println!("Auto-connecting to IAC Driver at index {}", idx);
+            // Don't fail if we can't connect - just log it
+            if let Err(e) = handler.connect_to_device(idx) {
+                eprintln!("Failed to auto-connect to IAC Driver: {}", e);
+            }
+        } else {
+            println!("No IAC Driver found for auto-connection");
+        }
+        
+        Ok((handler, receiver))
+    }
+    
+    /// Finds the index of the IAC Driver in the available ports list
+    fn find_iac_driver(&self) -> Option<usize> {
+        for (idx, (_, name, _)) in self.available_ports.iter().enumerate() {
+            if name.contains("IAC") {
+                return Some(idx);
+            }
+        }
+        None
     }
 
     /// Sets the voice manager for direct MIDI event handling.
@@ -148,29 +168,23 @@ impl MidiHandler {
     /// ```
     pub fn scan_devices(&mut self) -> Result<(), Box<dyn Error>> {
         // Create a new MidiInput instance if needed
-        // This we have a fresh view of the MIDI system
         if self.midi_in.is_none() {
-            // Initialize with a client name that identifies our application to the system
             self.midi_in = Some(MidiInput::new("rust_synth_midi_input")?);
         }
         
-        // Get a reference to the MidiInput instance
         let midi_in = self.midi_in.as_ref().unwrap();
-        
-        // Clear the current list of ports before scanning
         self.available_ports.clear();
         
-        // Iterate through all available ports
-        // midir::MidiInput::ports() queries the OS for all available MIDI input devices
+        println!("Available MIDI input devices:");
+        
+        // Collect all available ports
         for (i, port) in midi_in.ports().into_iter().enumerate() {
-            // Try to get the name of each port
             match midi_in.port_name(&port) {
                 Ok(name) => {
-                    // Store the port index, name, and port object
+                    println!("  {}: {}", i, name);
                     self.available_ports.push((i, name, port));
                 },
                 Err(err) => {
-                    // Log errors but continue processing other ports
                     eprintln!("Error getting port name: {}", err);
                 }
             }
@@ -237,8 +251,8 @@ impl MidiHandler {
     ///     midi_handler.connect_to_device(0).unwrap(); // Connect to the first device
     /// }
     /// ```
-    pub fn connect_to_device(&mut self, index: usize) -> Result<(), Box<dyn Error>> {
-        // Disconnect any existing connection first to avoid resource leaks
+    fn connect_to_device(&mut self, index: usize) -> Result<(), Box<dyn Error>> {
+        // Disconnect any existing connection first
         self.disconnect();
         
         // Verify the index is valid
@@ -246,29 +260,25 @@ impl MidiHandler {
             return Err("Invalid MIDI device index".into());
         }
         
-        // Get the port and name for the selected device
-        let (_, name, port) = &self.available_ports[index];
-        let port = port.clone(); // Clone the port object for use in the connection
-        let port_name = name.clone(); // Clone the name for the success message
+        // Clone the port and name for the selected device
+        let (idx, name, port) = &self.available_ports[index];
+        let port = port.clone();
+        let port_name = name.clone();
         
-        // Create a new MidiInput instance for the connection
-        // Note: midir requires a fresh MidiInput instance for each connection,
-        // which is why we create a new one here rather than reusing self.midi_in
+        println!("Attempting to connect to MIDI device #{}: {}", idx, port_name);
+        
+        // We need to create a new MidiInput for the connection
         let mut midi_in = MidiInput::new("rust_synth_midi_connection")?;
-        
-        // Configure the input to not ignore any MIDI message types
         midi_in.ignore(Ignore::None);
         
-        // Clone the sender and voice_manager for use in the callback closure
-        // This is necessary because the closure will outlive this function call
+        // Clone sender and voice_manager for the closure
         let sender = self.sender.clone();
         let voice_manager = self.voice_manager.clone();
         
-        // Connect to the MIDI input port and set up the callback
-        // This callback will be called whenever a MIDI message is received
+        // Add debug print in the callback to confirm we're receiving MIDI messages
         let connection = midi_in.connect(
             &port,
-            "rust_synth", // Connection name visible to other MIDI applications
+            "rust_synth",
             move |_timestamp, message, _| {
                 // This closure is called for each incoming MIDI message
                 
