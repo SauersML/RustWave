@@ -113,7 +113,7 @@ impl MidiHandler {
             println!("No IAC Driver found for auto-connection");
         }
         
-        Ok((handler, receiver))
+        Ok((handler, receiver.clone()))
     }
     
     /// Finds the index of the IAC Driver in the available ports list
