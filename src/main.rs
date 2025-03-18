@@ -17,6 +17,7 @@ use eframe::egui;
 
 use crate::voice_manager::VoiceManager;
 use crate::ui::SynthUI;
+use crate::midi_handler::MidiHandler;
 
 impl eframe::App for SynthApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -42,8 +43,9 @@ where
     let channels = config.channels as usize;
 
     let voice_manager = Arc::new(Mutex::new(VoiceManager::new(sample_rate, 8))); // 8 voices
+    let (mut midi_handler, _midi_rx) = MidiHandler::new()?;
+    midi_handler.set_voice_manager(Arc::clone(&voice_manager));
     let running = Arc::new(AtomicBool::new(true));
-
     let vm_clone = Arc::clone(&voice_manager);
 
     let stream = device.build_output_stream(
