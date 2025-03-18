@@ -6,6 +6,7 @@ mod voice_manager;
 mod filter;
 mod reverb;
 mod chorus;
+mod midi_handler;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat, SizedSample};
